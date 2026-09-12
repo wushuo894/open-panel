@@ -6,11 +6,40 @@ import { appUrl } from '../lib/paths'
 import { appState, loadAuth } from '../stores/app'
 
 const router = useRouter()
-const form = ref({ username: 'admin', password: '' })
+const REMEMBERED_LOGIN_KEY = 'open-panel-remembered-login'
+const rememberedLogin = loadRememberedLogin()
+const form = ref({ username: rememberedLogin.username || 'admin', password: rememberedLogin.password || '' })
+const rememberPassword = ref(Boolean(rememberedLogin.password))
 const loading = ref(false)
 const error = ref('')
 const showPassword = ref(false)
 const initialized = computed(() => appState.auth.initialized)
+
+function loadRememberedLogin() {
+  try {
+    const value = JSON.parse(localStorage.getItem(REMEMBERED_LOGIN_KEY) || '{}')
+    return typeof value === 'object' && value ? value : {}
+  } catch {
+    localStorage.removeItem(REMEMBERED_LOGIN_KEY)
+    return {}
+  }
+}
+
+function updateRememberPassword(value) {
+  rememberPassword.value = value
+  if (!value) localStorage.removeItem(REMEMBERED_LOGIN_KEY)
+}
+
+function saveRememberedLogin() {
+  if (!rememberPassword.value) {
+    localStorage.removeItem(REMEMBERED_LOGIN_KEY)
+    return
+  }
+  localStorage.setItem(REMEMBERED_LOGIN_KEY, JSON.stringify({
+    username: form.value.username,
+    password: form.value.password
+  }))
+}
 
 onMounted(async () => {
   try {
@@ -27,6 +56,7 @@ async function submit() {
       method: 'POST', body: JSON.stringify(form.value)
     })
     setToken(data.token)
+    saveRememberedLogin()
     appState.auth.authenticated = true
     router.replace('/settings')
   } catch (e) { error.value = e.message }
@@ -47,6 +77,14 @@ async function submit() {
       <form autocomplete="on" @submit.prevent="submit">
         <v-text-field v-model="form.username" label="用户名" name="username" autocomplete="username" prepend-inner-icon="mdi-account-outline" required />
         <v-text-field v-model="form.password" label="密码" name="password" :type="showPassword ? 'text' : 'password'" :autocomplete="initialized ? 'current-password' : 'new-password'" prepend-inner-icon="mdi-lock-outline" :append-inner-icon="showPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'" required @click:append-inner="showPassword = !showPassword" />
+        <v-checkbox
+          :model-value="rememberPassword"
+          label="记住密码"
+          color="primary"
+          density="compact"
+          hide-details
+          @update:model-value="updateRememberPassword"
+        />
         <v-btn block color="secondary" size="large" type="submit" :loading="loading">
           {{ initialized ? '登录' : '创建管理员' }}
         </v-btn>
