@@ -175,8 +175,7 @@ public class WebScanService {
             String url = protocol + "://" + hostHeader + (isDefaultPort(port, secure) ? "" : ":" + port) + "/";
             Document document = Jsoup.parse(new ByteArrayInputStream(response, headerEnd + 4,
                     response.length - headerEnd - 4), null, url);
-            String title = document.title().strip();
-            if (title.isBlank()) title = host + ":" + port;
+            String title = extractTitle(document, host + ":" + port);
             Element descriptionElement = document.selectFirst("meta[name=description], meta[property=og:description]");
             String description = descriptionElement == null ? "发现的 Web 服务 · HTTP " + statusCode
                     : descriptionElement.attr("content").strip();
@@ -218,10 +217,7 @@ public class WebScanService {
             }
             Document document = response.parse();
             String finalUrl = response.url().toString();
-            String title = document.title().strip();
-            Element openGraphTitle = document.selectFirst("meta[property=og:title]");
-            if (title.isBlank() && openGraphTitle != null) title = openGraphTitle.attr("content").strip();
-            if (title.isBlank()) title = uri.getHost();
+            String title = extractTitle(document, uri.getHost());
             Element descriptionElement = document.selectFirst(
                     "meta[name=description], meta[property=og:description], meta[name=twitter:description]");
             String description = descriptionElement == null ? "" : descriptionElement.attr("content").strip();
@@ -336,6 +332,29 @@ public class WebScanService {
 
     private boolean isIpLiteral(String host) {
         return host.matches("[0-9.]+") || host.contains(":");
+    }
+
+    private String extractTitle(Document document, String fallback) {
+        String title = cleanText(document.title());
+        if (!title.isBlank()) return title;
+        for (String selector : List.of(
+                "meta[property=og:title]",
+                "meta[name=twitter:title]",
+                "meta[name=application-name]",
+                "meta[name=apple-mobile-web-app-title]",
+                "meta[itemprop=name]",
+                "meta[property=og:site_name]")) {
+            Element element = document.selectFirst(selector);
+            title = element == null ? "" : cleanText(element.attr("content"));
+            if (!title.isBlank()) return title;
+        }
+        Element heading = document.selectFirst("main h1, header h1, h1");
+        title = heading == null ? "" : cleanText(heading.text());
+        return title.isBlank() ? fallback : title;
+    }
+
+    private String cleanText(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", " ").strip();
     }
 
     private String limit(String value, int max) {

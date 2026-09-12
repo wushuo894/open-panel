@@ -102,7 +102,7 @@ public class StatusService {
                 result.add(item);
             }
             return result;
-        } catch (Exception exception) {
+        } catch (Exception | LinkageError exception) {
             throw new IllegalStateException("Docker 不可用，请检查 Socket 挂载和权限", exception);
         }
     }
@@ -126,7 +126,7 @@ public class StatusService {
             return containerStatus(docker, containerId);
         } catch (IllegalArgumentException exception) {
             throw exception;
-        } catch (Exception exception) {
+        } catch (Exception | LinkageError exception) {
             throw new IllegalStateException("容器操作失败: " + safeMessage(exception), exception);
         }
     }
@@ -196,7 +196,7 @@ public class StatusService {
                     }
                 }
             }
-        } catch (Exception exception) {
+        } catch (Exception | LinkageError exception) {
             result.put("", offline("Docker 不可用"));
         }
         return result;
@@ -334,7 +334,7 @@ public class StatusService {
         };
     }
 
-    private String safeMessage(Exception exception) {
+    private String safeMessage(Throwable exception) {
         String message = exception.getMessage();
         return message == null || message.isBlank() ? exception.getClass().getSimpleName() : message;
     }
