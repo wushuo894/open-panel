@@ -362,7 +362,7 @@ function logout() {
       <v-alert v-if="message" type="success" variant="tonal" closable @click:close="message = ''">{{ message }}</v-alert>
       <v-alert v-if="error" type="error" variant="tonal" closable @click:close="error = ''">{{ error }}</v-alert>
 
-      <v-window v-model="tab">
+      <v-window v-model="tab" class="settings-window">
         <v-window-item value="appearance">
           <section class="settings-section">
             <div class="section-heading"><div><h2>站点与页面</h2><p>名称、主题与首页呈现方式</p></div></div>
@@ -650,6 +650,8 @@ function logout() {
 .header-inner span { margin-top: 4px; color: rgba(var(--v-theme-on-surface),.5); font-size: .74rem; }
 .settings-layout { padding-block: 16px 64px; }
 .settings-tabs { margin-bottom: 12px; border-bottom: 1px solid rgba(var(--v-theme-on-surface),.08); }
+.settings-window { margin-inline: -24px; }
+.settings-window :deep(.v-window-item) { padding-inline: 24px; }
 .settings-section { padding-block: 28px; border-bottom: 1px solid rgba(var(--v-theme-on-surface),.09); }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 22px; }
 .section-heading h2 { margin: 0; font-size: 1.08rem; letter-spacing: 0; }
@@ -710,6 +712,8 @@ function logout() {
   .group-actions { justify-content: flex-end; }
 }
 @media (max-width: 540px) {
+  .settings-window { margin-inline: -12px; }
+  .settings-window :deep(.v-window-item) { padding-inline: 20px; }
   .switch-grid { grid-template-columns: 1fr; }
   .section-heading { align-items: flex-start; flex-direction: column; }
   .header-inner > div { display: none; }
