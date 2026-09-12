@@ -1,22 +1,17 @@
 services:
   open-panel:
-    # 本地构建镜像前先执行：mvn -DskipTests package
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
     image: ghcr.io/wushuo894/open-panel:latest
     container_name: open-panel
-    restart: unless-stopped
-    ports:
-      - "7788:7788"
+    restart: always
+    network_mode: host
     environment:
+      SERVER_PORT: 57788
       TZ: Asia/Shanghai
-      PUID: 1000
-      PGID: 1000
-      UMASK: "022"
-      # 使用 Docker 卡片时，填写宿主机 Docker 组的 GID。
-      # DOCKER_GID: 999
+      PUID: 0
+      PGID: 0
+      UMASK: 022
     volumes:
-      - ./config:/config
-      # 使用 Docker 卡片时取消下一行注释；只读挂载仍可读取容器状态。
-      # - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /volume1/docker/open-panel/config:/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # - /volume1:/volume1
+      # - /volume2:/volume2
