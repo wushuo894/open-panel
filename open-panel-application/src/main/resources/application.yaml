@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: open-panel
+  jmx:
+    enabled: false
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+server:
+  port: ${SERVER_PORT:7788}
+  address: ${SERVER_ADDRESS:0.0.0.0}
+  shutdown: graceful
+  compression:
+    enabled: true
+    min-response-size: 1KB
+
+open-panel:
+  config-dir: ${OPEN_PANEL_CONFIG_DIR:./config}
+  container: ${OPEN_PANEL_CONTAINER:false}

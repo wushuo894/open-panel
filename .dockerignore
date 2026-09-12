@@ -1,0 +1,9 @@
+.git
+.idea
+.pnpm-store
+**/target/*
+!open-panel-application/target/open-panel.jar
+**/node_modules
+**/dist
+config
+*.log
