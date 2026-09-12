@@ -34,6 +34,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Get version
+        run: |
+          version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout -f pom.xml)
+          echo "version=v$version" >> $GITHUB_ENV
       - uses: actions/download-artifact@v4
         with:
           name: open-panel
@@ -50,4 +54,4 @@ jobs:
           push: true
           tags: |
             ghcr.io/wushuo894/open-panel:latest
-            ghcr.io/wushuo894/open-panel:${{ github.ref_name }}
+            ghcr.io/wushuo894/open-panel:${{ env.version }}
