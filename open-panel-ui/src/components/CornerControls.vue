@@ -3,7 +3,8 @@ import { computed, mergeProps, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { appState, changeNetwork } from '../stores/app'
 
-const props = defineProps({ hoverOnly: Boolean, onCover: Boolean })
+const props = defineProps({ hoverOnly: Boolean, onCover: Boolean, editing: Boolean, editLoading: Boolean, saving: Boolean })
+const emit = defineEmits(['edit', 'save', 'cancel'])
 const router = useRouter()
 const networkMenuOpen = ref(false)
 const items = [
@@ -14,7 +15,8 @@ const items = [
 const classes = computed(() => ({
   'hover-only': props.hoverOnly,
   'menu-open': networkMenuOpen.value,
-  'on-cover': props.onCover
+  'on-cover': props.onCover,
+  editing: props.editing
 }))
 const networkItem = computed(() => items.find(item => item.value === appState.network) || items[0])
 </script>
@@ -47,6 +49,33 @@ const networkItem = computed(() => items.find(item => item.value === appState.ne
           />
         </v-list>
       </v-menu>
+      <template v-if="appState.auth.authenticated">
+        <v-tooltip v-if="!editing" text="编辑首页卡片" location="bottom">
+          <template #activator="{ props: tooltipProps }">
+            <v-btn
+              v-bind="tooltipProps"
+              icon="mdi-pencil-outline"
+              variant="text"
+              size="small"
+              :loading="editLoading"
+              aria-label="编辑首页卡片"
+              @click="emit('edit')"
+            />
+          </template>
+        </v-tooltip>
+        <template v-else>
+          <v-tooltip text="取消编辑" location="bottom">
+            <template #activator="{ props: tooltipProps }">
+              <v-btn v-bind="tooltipProps" icon="mdi-close" variant="text" size="small" aria-label="取消编辑" :disabled="saving" @click="emit('cancel')" />
+            </template>
+          </v-tooltip>
+          <v-tooltip text="保存卡片布局" location="bottom">
+            <template #activator="{ props: tooltipProps }">
+              <v-btn v-bind="tooltipProps" icon="mdi-content-save-outline" variant="text" size="small" aria-label="保存卡片布局" :loading="saving" @click="emit('save')" />
+            </template>
+          </v-tooltip>
+        </template>
+      </template>
       <v-tooltip :text="appState.auth.authenticated ? '设置' : '登录'" location="bottom">
         <template #activator="{ props: tooltipProps }">
           <v-btn
@@ -89,7 +118,8 @@ const networkItem = computed(() => items.find(item => item.value === appState.ne
   .corner-hotspot.hover-only .corner-controls { opacity: 0; pointer-events: none; transform: translateY(-6px); }
   .corner-hotspot.hover-only:hover .corner-controls,
   .corner-hotspot.hover-only:focus-within .corner-controls,
-  .corner-hotspot.hover-only.menu-open .corner-controls { opacity: 1; pointer-events: auto; transform: none; }
+  .corner-hotspot.hover-only.menu-open .corner-controls,
+  .corner-hotspot.hover-only.editing .corner-controls { opacity: 1; pointer-events: auto; transform: none; }
 }
 @media (max-width: 600px) { .corner-hotspot { padding-top: 10px; padding-right: 10px; } }
 </style>

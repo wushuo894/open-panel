@@ -10,10 +10,24 @@ const props = defineProps({
   statuses: Object,
   cover: Boolean,
   hideHeader: Boolean,
-  centered: Boolean
+  centered: Boolean,
+  editing: Boolean,
+  draggedCardId: String
 })
+const emit = defineEmits(['add-card', 'edit-card', 'remove-card', 'move-card', 'drag-start', 'drag-end', 'drop-card', 'drop-group'])
 const dockerActionLoading = ref({})
 const actionError = ref('')
+
+function handleCardClick(card) {
+  if (!props.editing) open(card)
+}
+
+function startDrag(event, card) {
+  if (!props.editing) return
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', card.id)
+  emit('drag-start', card)
+}
 
 function open(card) {
   const url = cardUrl(card)
@@ -109,12 +123,19 @@ async function controlDocker(card, action) {
 </script>
 
 <template>
-  <section class="group-section" :class="{ cover }">
+  <section class="group-section" :class="{ cover, editing, 'group-disabled': editing && !group.enabled }">
     <header v-if="!hideHeader" class="group-header">
       <v-icon :icon="group.icon" size="20" />
       <h2>{{ group.title }}</h2>
+      <span v-if="editing && !group.enabled" class="hidden-label">已隐藏</span>
+      <v-btn v-if="editing" icon="mdi-plus" variant="text" size="small" class="group-add" :aria-label="`向${group.title}添加卡片`" @click="emit('add-card', group.id)" />
     </header>
-    <div class="card-grid" :class="{ 'icon-grid': group.displayMode === 'icon', centered }">
+    <div
+      class="card-grid"
+      :class="{ 'icon-grid': group.displayMode === 'icon', centered, 'editing-grid': editing }"
+      @dragover.prevent
+      @drop="emit('drop-group', group.id)"
+    >
       <div
         v-for="card in cards"
         :key="card.id"
@@ -122,12 +143,19 @@ async function controlDocker(card, action) {
         :class="{
           'icon-only': group.displayMode === 'icon',
           'docker-card': card.type === 'docker',
-          'not-clickable': card.type === 'system' || !cardUrl(card)
+          'not-clickable': editing || card.type === 'system' || !cardUrl(card),
+          'card-hidden': editing && !card.enabled,
+          dragging: draggedCardId === card.id
         }"
-        :role="card.type !== 'system' && cardUrl(card) ? 'link' : undefined"
-        :tabindex="card.type !== 'system' && cardUrl(card) ? 0 : undefined"
-        @click="open(card)"
-        @keydown.enter.self="open(card)"
+        :role="!editing && card.type !== 'system' && cardUrl(card) ? 'link' : undefined"
+        :tabindex="!editing && card.type !== 'system' && cardUrl(card) ? 0 : undefined"
+        :draggable="editing"
+        @click="handleCardClick(card)"
+        @keydown.enter.self="handleCardClick(card)"
+        @dragstart="startDrag($event, card)"
+        @dragend="emit('drag-end')"
+        @dragover.prevent
+        @drop.stop="emit('drop-card', { groupId: group.id, cardId: card.id })"
       >
         <span class="card-icon">
           <img v-if="card.iconUrl" :src="appUrl(card.iconUrl)" alt="" />
@@ -150,7 +178,7 @@ async function controlDocker(card, action) {
           </small>
         </span>
         <span v-if="statuses[card.id] && card.type !== 'system'" class="state-dot" :class="{ online: statuses[card.id].online }" :title="statuses[card.id].status" />
-        <span v-if="card.type === 'docker' && appState.auth.authenticated && group.displayMode !== 'icon'" class="docker-actions" @click.stop @keydown.stop>
+        <span v-if="!editing && card.type === 'docker' && appState.auth.authenticated && group.displayMode !== 'icon'" class="docker-actions" @click.stop @keydown.stop>
           <v-tooltip v-for="action in dockerActions(card)" :key="action.value" :text="action.title" location="top">
             <template #activator="{ props: tooltipProps }">
               <v-btn
@@ -167,7 +195,7 @@ async function controlDocker(card, action) {
             </template>
           </v-tooltip>
         </span>
-        <v-menu v-else-if="card.type === 'docker' && appState.auth.authenticated">
+        <v-menu v-else-if="!editing && card.type === 'docker' && appState.auth.authenticated">
           <template #activator="{ props: menuProps }">
             <v-btn v-bind="menuProps" icon="mdi-dots-horizontal" variant="text" size="x-small" class="docker-menu" aria-label="容器操作" @click.stop />
           </template>
@@ -182,8 +210,18 @@ async function controlDocker(card, action) {
             />
           </v-list>
         </v-menu>
-        <v-tooltip v-if="group.displayMode === 'icon'" activator="parent" location="bottom">{{ card.title }}</v-tooltip>
+        <div v-if="editing" class="card-edit-actions" @click.stop @mousedown.stop>
+          <v-btn icon="mdi-arrow-left" variant="flat" size="x-small" aria-label="卡片前移" title="卡片前移" @click="emit('move-card', { card, direction: -1 })" />
+          <v-btn icon="mdi-arrow-right" variant="flat" size="x-small" aria-label="卡片后移" title="卡片后移" @click="emit('move-card', { card, direction: 1 })" />
+          <v-btn icon="mdi-pencil-outline" variant="flat" size="x-small" aria-label="编辑卡片" title="编辑卡片" @click="emit('edit-card', card)" />
+          <v-btn icon="mdi-delete-outline" variant="flat" size="x-small" color="error" aria-label="删除卡片" title="删除卡片" @click="emit('remove-card', card)" />
+        </div>
+        <v-tooltip v-if="group.displayMode === 'icon' && !editing" activator="parent" location="bottom">{{ card.title }}</v-tooltip>
       </div>
+      <button v-if="editing" type="button" class="add-card-tile" @click="emit('add-card', group.id)">
+        <v-icon icon="mdi-plus" />
+        <span>添加卡片</span>
+      </button>
     </div>
     <v-snackbar :model-value="Boolean(actionError)" color="error" timeout="3500" @update:model-value="value => { if (!value) actionError = '' }">{{ actionError }}</v-snackbar>
   </section>
@@ -194,6 +232,9 @@ async function controlDocker(card, action) {
 .group-section.cover { color: white; text-shadow: 0 1px 8px rgba(0,0,0,.32); }
 .group-header { display: flex; align-items: center; gap: 9px; margin-bottom: 13px; }
 .group-header h2 { margin: 0; font-size: 1.05rem; font-weight: 700; letter-spacing: 0; }
+.group-disabled .group-header { opacity: .58; }
+.group-add { margin-left: auto; }
+.hidden-label { padding: 2px 6px; border-radius: 4px; background: rgba(var(--v-theme-on-surface), .1); color: currentColor; opacity: .62; font-size: .7rem; }
 .card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .card-grid.icon-grid { grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); }
 .card-grid.centered { grid-template-columns: repeat(auto-fit, minmax(220px, 270px)); justify-content: center; }
@@ -222,6 +263,17 @@ async function controlDocker(card, action) {
 .nav-card.not-clickable:hover { transform: none; border-color: rgba(var(--v-theme-on-surface), .09); box-shadow: none; }
 .cover .nav-card.not-clickable:hover { border-color: rgba(255,255,255,.22); }
 .nav-card.icon-only { justify-content: center; height: 68px; padding: 8px; }
+.nav-card.card-hidden { opacity: .55; border-style: dashed; }
+.nav-card.dragging { opacity: .35; }
+.editing-grid .nav-card { cursor: grab; }
+.card-edit-actions { position: absolute; z-index: 3; inset: 0; display: flex; align-items: center; justify-content: center; gap: 5px; border-radius: inherit; background: rgba(18,22,21,.68); opacity: 0; transition: opacity .16s ease; }
+.nav-card:hover .card-edit-actions, .nav-card:focus-within .card-edit-actions { opacity: 1; }
+.card-edit-actions :deep(.v-btn) { background: rgba(255,255,255,.9); color: #202624; }
+.add-card-tile { display: flex; align-items: center; justify-content: center; min-width: 0; height: 86px; gap: 7px; padding: 12px; border: 1px dashed rgba(var(--v-theme-on-surface), .28); border-radius: 8px; background: rgba(var(--v-theme-surface), .38); color: currentColor; cursor: pointer; }
+.icon-grid .add-card-tile { width: 68px; height: 68px; padding: 6px; }
+.icon-grid .add-card-tile span { display: none; }
+.cover .add-card-tile { border-color: rgba(255,255,255,.35); background: rgba(21,26,25,.38); }
+.add-card-tile:hover { border-color: rgb(var(--v-theme-primary)); background: rgba(var(--v-theme-surface), .58); }
 .nav-card.docker-card:not(.icon-only) { height: 116px; }
 .docker-card:not(.icon-only) .card-copy { padding-right: 58px; }
 .card-icon { display: grid; flex: 0 0 46px; width: 46px; height: 46px; place-items: center; overflow: hidden; border: 1px solid rgba(255,255,255,.16); border-radius: 8px; background: rgba(var(--v-theme-secondary), .68); color: #1a211d; backdrop-filter: blur(8px); }
@@ -239,4 +291,5 @@ async function controlDocker(card, action) {
 .state-dot.online { background: rgb(var(--v-theme-success)); }
 @media (max-width: 900px) { .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .card-grid { grid-template-columns: 1fr; } .card-grid.icon-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (hover: none), (pointer: coarse) { .card-edit-actions { opacity: 1; } }
 </style>

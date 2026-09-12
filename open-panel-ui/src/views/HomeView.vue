@@ -2,9 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTheme } from 'vuetify'
+import CardEditorDialog from '../components/CardEditorDialog.vue'
 import CardGroup from '../components/CardGroup.vue'
 import CornerControls from '../components/CornerControls.vue'
 import SearchBar from '../components/SearchBar.vue'
+import { api } from '../lib/api'
 import { appUrl } from '../lib/paths'
 import { appState, loadAuth, loadPanel, loadStatuses } from '../stores/app'
 
@@ -12,16 +14,27 @@ const router = useRouter()
 const theme = useTheme()
 const now = ref(new Date())
 const wallpaperIndex = ref(0)
+const editing = ref(false)
+const editLoading = ref(false)
+const saving = ref(false)
+const editConfig = ref(null)
+const editorOpen = ref(false)
+const editorCard = ref(null)
+const originalGroupId = ref('')
+const draggedCardId = ref('')
+const pendingRemoval = ref(null)
+const notice = ref('')
+const editError = ref('')
 let clockTimer
 let wallpaperTimer
 
-const panel = computed(() => appState.panel)
+const panel = computed(() => editing.value ? editConfig.value : appState.panel)
 const coverMode = computed(() => panel.value?.page?.mode === 'cover')
 const wallpapers = computed(() => (panel.value?.page?.cover?.wallpapers?.filter(Boolean) || []).map(appUrl))
 const wallpaper = computed(() => wallpapers.value[wallpaperIndex.value] || appUrl(panel.value?.site?.background || ''))
 const listBackground = computed(() => appUrl(panel.value?.site?.background || '') || wallpaper.value)
 const pageBackground = computed(() => coverMode.value ? wallpaper.value : listBackground.value)
-const groups = computed(() => panel.value?.groups || [])
+const groups = computed(() => [...(panel.value?.groups || [])].sort((left, right) => (left.sort ?? 0) - (right.sort ?? 0)))
 const coverGroupId = computed(() => coverMode.value ? panel.value?.page?.cover?.groupIds?.[0] || '' : '')
 const coverGroup = computed(() => groups.value.find(group => group.id === coverGroupId.value))
 const bodyGroups = computed(() => groups.value.filter(group => group.id !== coverGroupId.value))
@@ -35,7 +48,153 @@ const weekdayText = computed(() => new Intl.DateTimeFormat('zh-CN', {
 }).format(now.value))
 
 function cardsFor(group) {
-  return (panel.value?.cards || []).filter(card => card.groupId === group.id)
+  return (panel.value?.cards || [])
+    .filter(card => card.groupId === group.id)
+    .sort((left, right) => (left.sort ?? 0) - (right.sort ?? 0))
+}
+
+function uuid() {
+  if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID()
+  const bytes = new Uint8Array(16)
+  if (typeof globalThis.crypto?.getRandomValues === 'function') globalThis.crypto.getRandomValues(bytes)
+  else for (let index = 0; index < bytes.length; index++) bytes[index] = Math.floor(Math.random() * 256)
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, value => value.toString(16).padStart(2, '0'))
+  return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10).join('')}`
+}
+
+async function startEditing() {
+  editLoading.value = true
+  editError.value = ''
+  try {
+    editConfig.value = await api('/api/admin/config')
+    editing.value = true
+  } catch (error) {
+    editError.value = error.message
+  } finally {
+    editLoading.value = false
+  }
+}
+
+function cancelEditing() {
+  editing.value = false
+  editConfig.value = null
+  editorOpen.value = false
+  pendingRemoval.value = null
+  draggedCardId.value = ''
+}
+
+async function saveEditing() {
+  saving.value = true
+  editError.value = ''
+  try {
+    normalizeAllCardSort()
+    await api('/api/admin/config', { method: 'PUT', body: JSON.stringify(editConfig.value) })
+    editing.value = false
+    editConfig.value = null
+    await loadPanel()
+    loadStatuses()
+    notice.value = '首页卡片已保存'
+  } catch (error) {
+    editError.value = error.message
+  } finally {
+    saving.value = false
+  }
+}
+
+function newCard(groupId) {
+  originalGroupId.value = ''
+  editorCard.value = {
+    id: uuid(), groupId, type: 'custom', title: '新卡片', remark: '', icon: 'mdi-web', iconUrl: '', enabled: true,
+    sort: cardsFor({ id: groupId }).length, openTarget: 'new',
+    custom: { internalUrl: '', externalUrl: '' },
+    system: { metric: 'overview' },
+    service: { serviceType: 'generic', internalUrl: '', externalUrl: '', statusUrl: '', token: '' },
+    docker: { containerId: '', internalUrl: '', externalUrl: '' }
+  }
+  editorOpen.value = true
+}
+
+function editCard(card) {
+  originalGroupId.value = card.groupId
+  editorCard.value = JSON.parse(JSON.stringify(card))
+  editorOpen.value = true
+}
+
+function commitCard(card) {
+  const cards = editConfig.value.cards
+  const index = cards.findIndex(item => item.id === card.id)
+  if (originalGroupId.value && originalGroupId.value !== card.groupId) {
+    card.sort = cardsFor({ id: card.groupId }).filter(item => item.id !== card.id).length
+  }
+  if (index >= 0) cards.splice(index, 1, card)
+  else cards.push(card)
+  if (originalGroupId.value) normalizeCardSort(originalGroupId.value)
+  normalizeCardSort(card.groupId)
+  editorCard.value = null
+}
+
+function requestRemoveCard(card) {
+  pendingRemoval.value = card
+}
+
+function removeCard() {
+  const card = pendingRemoval.value
+  if (!card) return
+  editConfig.value.cards = editConfig.value.cards.filter(item => item.id !== card.id)
+  normalizeCardSort(card.groupId)
+  pendingRemoval.value = null
+}
+
+function normalizeCardSort(groupId) {
+  cardsFor({ id: groupId }).forEach((card, index) => { card.sort = index })
+}
+
+function normalizeAllCardSort() {
+  groups.value.forEach(group => normalizeCardSort(group.id))
+}
+
+function moveCard({ card, direction }) {
+  const ordered = cardsFor({ id: card.groupId })
+  const index = ordered.findIndex(item => item.id === card.id)
+  const target = index + direction
+  if (index < 0 || target < 0 || target >= ordered.length) return
+  ;[ordered[index], ordered[target]] = [ordered[target], ordered[index]]
+  ordered.forEach((item, sort) => { item.sort = sort })
+}
+
+function startCardDrag(card) {
+  draggedCardId.value = card.id
+}
+
+function dropCard({ groupId, cardId }) {
+  const dragged = editConfig.value?.cards.find(card => card.id === draggedCardId.value)
+  if (!dragged || dragged.id === cardId) return endCardDrag()
+  const sourceGroupId = dragged.groupId
+  const ordered = cardsFor({ id: groupId }).filter(card => card.id !== dragged.id)
+  const targetIndex = ordered.findIndex(card => card.id === cardId)
+  dragged.groupId = groupId
+  ordered.splice(targetIndex < 0 ? ordered.length : targetIndex, 0, dragged)
+  ordered.forEach((card, index) => { card.sort = index })
+  if (sourceGroupId !== groupId) normalizeCardSort(sourceGroupId)
+  endCardDrag()
+}
+
+function dropCardIntoGroup(groupId) {
+  const dragged = editConfig.value?.cards.find(card => card.id === draggedCardId.value)
+  if (!dragged) return
+  const sourceGroupId = dragged.groupId
+  const ordered = cardsFor({ id: groupId }).filter(card => card.id !== dragged.id)
+  dragged.groupId = groupId
+  ordered.push(dragged)
+  ordered.forEach((card, index) => { card.sort = index })
+  if (sourceGroupId !== groupId) normalizeCardSort(sourceGroupId)
+  endCardDrag()
+}
+
+function endCardDrag() {
+  draggedCardId.value = ''
 }
 
 function scrollToNavigation() {
@@ -80,7 +239,17 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
     :style="panel ? { '--wallpaper': `url(${pageBackground})`, '--overlay': panel.site.backgroundOverlay } : undefined"
   >
     <v-progress-linear v-if="appState.loading" indeterminate color="secondary" class="loading" />
-    <CornerControls v-if="panel" :hover-only="panel.site.cornerControlsHoverOnly" :on-cover="coverMode" />
+    <CornerControls
+      v-if="panel"
+      :hover-only="panel.site.cornerControlsHoverOnly"
+      :on-cover="coverMode"
+      :editing="editing"
+      :edit-loading="editLoading"
+      :saving="saving"
+      @edit="startEditing"
+      @save="saveEditing"
+      @cancel="cancelEditing"
+    />
 
     <section v-if="panel && coverMode" class="cover-panel" :style="{ '--wallpaper': `url(${wallpaper})`, '--overlay': panel.site.backgroundOverlay }">
       <div class="cover-content content-width">
@@ -104,7 +273,24 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
         </div>
         <SearchBar :engines="panel.searchEngines" glass />
         <div v-if="coverGroup" class="cover-groups">
-          <CardGroup :group="coverGroup" :cards="cardsFor(coverGroup)" :statuses="appState.statuses" cover hide-header centered />
+          <CardGroup
+            :group="coverGroup"
+            :cards="cardsFor(coverGroup)"
+            :statuses="appState.statuses"
+            :editing="editing"
+            :dragged-card-id="draggedCardId"
+            cover
+            hide-header
+            centered
+            @add-card="newCard"
+            @edit-card="editCard"
+            @remove-card="requestRemoveCard"
+            @move-card="moveCard"
+            @drag-start="startCardDrag"
+            @drag-end="endCardDrag"
+            @drop-card="dropCard"
+            @drop-group="dropCardIntoGroup"
+          />
         </div>
       </div>
       <button type="button" class="scroll-hint" aria-label="查看导航" @click="scrollToNavigation">
@@ -139,7 +325,23 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
           </div>
           <SearchBar :engines="panel.searchEngines" />
         </header>
-        <CardGroup v-for="group in (coverMode ? bodyGroups : groups)" :key="group.id" :group="group" :cards="cardsFor(group)" :statuses="appState.statuses" />
+        <CardGroup
+          v-for="group in (coverMode ? bodyGroups : groups)"
+          :key="group.id"
+          :group="group"
+          :cards="cardsFor(group)"
+          :statuses="appState.statuses"
+          :editing="editing"
+          :dragged-card-id="draggedCardId"
+          @add-card="newCard"
+          @edit-card="editCard"
+          @remove-card="requestRemoveCard"
+          @move-card="moveCard"
+          @drag-start="startCardDrag"
+          @drag-end="endCardDrag"
+          @drop-card="dropCard"
+          @drop-group="dropCardIntoGroup"
+        />
         <div v-if="!(coverMode ? bodyGroups : groups).length" class="empty-state">
           <v-icon icon="mdi-view-grid-plus-outline" size="34" />
           <p>暂无导航分组</p>
@@ -157,6 +359,23 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
       <span>{{ appState.error }}</span>
       <v-btn color="secondary" @click="loadPanel">重试</v-btn>
     </div>
+
+    <CardEditorDialog v-model="editorOpen" :card="editorCard" :groups="groups" @save="commitCard" />
+
+    <v-dialog :model-value="Boolean(pendingRemoval)" max-width="420" @update:model-value="value => { if (!value) pendingRemoval = null }">
+      <v-card>
+        <v-card-title>删除卡片</v-card-title>
+        <v-card-text>确定删除“{{ pendingRemoval?.title }}”吗？</v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="pendingRemoval = null">取消</v-btn>
+          <v-btn color="error" @click="removeCard">删除</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-snackbar :model-value="Boolean(notice)" color="success" timeout="2600" @update:model-value="value => { if (!value) notice = '' }">{{ notice }}</v-snackbar>
+    <v-snackbar :model-value="Boolean(editError)" color="error" timeout="4200" @update:model-value="value => { if (!value) editError = '' }">{{ editError }}</v-snackbar>
   </main>
 </template>
 
@@ -178,6 +397,7 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
 .navigation-band { min-height: 340px; padding-block: 26px 48px; background: rgb(var(--v-theme-background)); }
 .navigation-band.list-mode { min-height: 0; padding: 24px 0 0; }
 .page-shell.wallpaper-page { position: relative; isolation: isolate; background: transparent; color: white; }
+.page-shell:has(.group-section.editing) .navigation-band { outline: 1px solid rgba(var(--v-theme-primary), .32); outline-offset: -1px; }
 .page-shell.wallpaper-page::before { content: ''; position: fixed; z-index: -1; inset: 0; background-image: linear-gradient(rgba(8,12,11,var(--overlay)), rgba(8,12,11,var(--overlay))), var(--wallpaper); background-position: center; background-size: cover; pointer-events: none; transform: translateZ(0); }
 .wallpaper-page .navigation-band { background: transparent; }
 .wallpaper-page .brand-lockup, .wallpaper-page .list-banner { text-shadow: 0 2px 16px rgba(0,0,0,.46); }

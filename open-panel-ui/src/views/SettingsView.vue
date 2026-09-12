@@ -14,17 +14,11 @@ const message = ref('')
 const error = ref('')
 const groupDialog = ref(false)
 const groupDraft = ref(null)
-const cardDialog = ref(false)
-const editingCard = ref(null)
-const editingOriginalGroupId = ref('')
 const importInput = ref(null)
 const updateInfo = ref(null)
 const updateLoading = ref(false)
 const updateAutoChecked = ref(false)
-const uploadingIcon = ref(false)
 const uploadingBackground = ref(false)
-const loadingMetadata = ref(false)
-const dockerContainers = ref([])
 const passwordForm = ref({ currentPassword: '', newPassword: '', confirmPassword: '' })
 const changingPassword = ref(false)
 const currentPageHost = globalThis.location?.hostname?.replace(/^\[|\]$/g, '') || '127.0.0.1'
@@ -64,31 +58,6 @@ const proxiesText = computed({
   set: value => { config.value.security.trustedProxyIps = lines(value) }
 })
 
-const cardTypes = [
-  { title: '自定义链接', value: 'custom' },
-  { title: '系统信息', value: 'system' },
-  { title: '软件服务', value: 'service' },
-  { title: 'Docker 容器', value: 'docker' }
-]
-const serviceTypes = [
-  { title: 'Emby', value: 'emby' },
-  { title: 'ani-rss', value: 'ani-rss' },
-  { title: 'qBittorrent', value: 'qbit' },
-  { title: '通用 Web 服务', value: 'generic' }
-]
-const serviceDefaults = {
-  emby: ['Emby', 'mdi-play-circle-outline', '媒体服务器'],
-  'ani-rss': ['ani-rss', 'mdi-rss', '自动追番与下载'],
-  qbit: ['qBittorrent', 'mdi-download-network-outline', '下载服务'],
-  generic: ['Web 服务', 'mdi-application-outline', '自托管 Web 服务']
-}
-const serviceAuthHints = {
-  emby: '填写 Emby API Key 后可显示版本、活跃播放和转码数量。',
-  'ani-rss': '填写 ani-rss 设置页生成的 API Key。',
-  qbit: '填写 qBittorrent 生成的 qbt_ 开头 API Key。',
-  generic: '通用服务使用状态检测 URL 探测 HTTP 状态。'
-}
-const currentServiceAuthHint = computed(() => serviceAuthHints[editingCard.value?.service?.serviceType] || serviceAuthHints.generic)
 const scanRunning = computed(() => ['queued', 'running', 'cancelling'].includes(scanJob.value?.status))
 const scanProgress = computed(() => scanJob.value?.total ? Math.round(scanJob.value.scanned / scanJob.value.total * 100) : 0)
 
@@ -148,10 +117,6 @@ function cardsForGroup(groupId) {
     .sort((left, right) => (left.sort ?? 0) - (right.sort ?? 0))
 }
 
-function cardTypeName(type) {
-  return cardTypes.find(item => item.value === type)?.title || type
-}
-
 function normalizeGroupSort() {
   sortedGroups.value.forEach((group, index) => { group.sort = index })
 }
@@ -168,15 +133,6 @@ function normalizeAllSort() {
 function moveGroup(group, direction) {
   const ordered = sortedGroups.value
   const index = ordered.findIndex(item => item.id === group.id)
-  const target = index + direction
-  if (index < 0 || target < 0 || target >= ordered.length) return
-  ;[ordered[index], ordered[target]] = [ordered[target], ordered[index]]
-  ordered.forEach((item, sort) => { item.sort = sort })
-}
-
-function moveCard(card, direction) {
-  const ordered = cardsForGroup(card.groupId)
-  const index = ordered.findIndex(item => item.id === card.id)
   const target = index + direction
   if (index < 0 || target < 0 || target >= ordered.length) return
   ;[ordered[index], ordered[target]] = [ordered[target], ordered[index]]
@@ -212,93 +168,6 @@ function removeGroup(group) {
   config.value.cards = config.value.cards.filter(card => card.groupId !== group.id)
   config.value.page.cover.groupIds = config.value.page.cover.groupIds.filter(id => id !== group.id)
   normalizeGroupSort()
-}
-
-function newCard(groupId = sortedGroups.value[0]?.id || '') {
-  editingOriginalGroupId.value = ''
-  editingCard.value = {
-    id: uuid(), groupId, type: 'custom', title: '新卡片', remark: '', icon: 'mdi-web', iconUrl: '', enabled: true,
-    sort: cardsForGroup(groupId).length, openTarget: 'new',
-    custom: { internalUrl: '', externalUrl: '' },
-    system: { metric: 'overview' },
-    service: { serviceType: 'generic', internalUrl: '', externalUrl: '', statusUrl: '', token: '' },
-    docker: { containerId: '', internalUrl: '', externalUrl: '' }
-  }
-  cardDialog.value = true
-  loadDockerContainers()
-}
-
-function editCard(card) {
-  editingOriginalGroupId.value = card.groupId
-  editingCard.value = JSON.parse(JSON.stringify(card))
-  editingCard.value.custom ||= { internalUrl: '', externalUrl: '' }
-  editingCard.value.system ||= { metric: 'overview' }
-  editingCard.value.service ||= { serviceType: 'generic', internalUrl: '', externalUrl: '', statusUrl: '', token: '' }
-  editingCard.value.docker ||= { containerId: '', internalUrl: '', externalUrl: '' }
-  cardDialog.value = true
-  loadDockerContainers()
-}
-
-function commitCard() {
-  if (!editingCard.value.title || !editingCard.value.groupId) return
-  const index = config.value.cards.findIndex(card => card.id === editingCard.value.id)
-  const destinationGroupId = editingCard.value.groupId
-  if (editingOriginalGroupId.value && editingOriginalGroupId.value !== destinationGroupId) {
-    editingCard.value.sort = cardsForGroup(destinationGroupId).length
-  }
-  if (index >= 0) config.value.cards.splice(index, 1, editingCard.value)
-  else config.value.cards.push(editingCard.value)
-  if (editingOriginalGroupId.value) normalizeCardSort(editingOriginalGroupId.value)
-  normalizeCardSort(destinationGroupId)
-  cardDialog.value = false
-}
-
-function removeCard(card) {
-  config.value.cards = config.value.cards.filter(item => item.id !== card.id)
-  normalizeCardSort(card.groupId)
-}
-
-function applyCardTypeDefaults(type) {
-  editingCard.value.type = type
-  if (type === 'system') {
-    Object.assign(editingCard.value, { title: '系统状态', icon: 'mdi-server-outline', remark: 'CPU、内存、存储与网络' })
-  } else if (type === 'docker') {
-    Object.assign(editingCard.value, { title: 'Docker 容器', icon: 'mdi-docker', remark: '容器运行状态' })
-    loadDockerContainers()
-  } else if (type === 'service') {
-    applyServiceDefaults(editingCard.value.service.serviceType || 'generic')
-  } else {
-    Object.assign(editingCard.value, { title: '自定义链接', icon: 'mdi-web', remark: '打开常用网站或服务' })
-  }
-}
-
-function applyServiceDefaults(type) {
-  editingCard.value.service.serviceType = type
-  const [title, icon, remark] = serviceDefaults[type] || serviceDefaults.generic
-  Object.assign(editingCard.value, { title, icon, remark })
-}
-
-async function autoFillCustomCard() {
-  const url = editingCard.value.custom.internalUrl?.trim() || editingCard.value.custom.externalUrl?.trim()
-  if (!url) { error.value = '请先填写内网或公网 URL'; return }
-  loadingMetadata.value = true
-  error.value = ''
-  try {
-    const metadata = await api('/api/admin/link-metadata', {
-      method: 'POST',
-      body: JSON.stringify({ url })
-    })
-    if (metadata.title) editingCard.value.title = metadata.title
-    if (metadata.description) editingCard.value.remark = metadata.description
-    if (metadata.iconUrl) editingCard.value.iconUrl = metadata.iconUrl
-    message.value = '已从链接补全标题、简介和图标'
-  } catch (e) { error.value = e.message }
-  finally { loadingMetadata.value = false }
-}
-
-async function loadDockerContainers() {
-  try { dockerContainers.value = await api('/api/admin/docker/containers') }
-  catch { dockerContainers.value = [] }
 }
 
 async function startScan() {
@@ -347,20 +216,6 @@ function addScannedServices() {
   }
   message.value = `已添加 ${selected.size} 个 Web 服务卡片，保存后生效`
   selectedServices.value = []
-}
-
-async function uploadIcon(value) {
-  const file = Array.isArray(value) ? value[0] : value
-  if (!file) return
-  uploadingIcon.value = true
-  error.value = ''
-  const body = new FormData()
-  body.append('file', file)
-  try {
-    const result = await api('/api/admin/assets/icon', { method: 'POST', body })
-    editingCard.value.iconUrl = result.url
-  } catch (e) { error.value = e.message }
-  finally { uploadingIcon.value = false }
 }
 
 async function uploadBackground(value) {
@@ -576,7 +431,7 @@ function logout() {
           </section>
 
           <section class="settings-section">
-            <div class="section-heading"><div><h2>分组与卡片</h2><p>在每个分组内编辑卡片，并调整首页显示顺序</p></div><v-btn prepend-icon="mdi-plus" variant="outlined" @click="addGroup">添加分组</v-btn></div>
+            <div class="section-heading"><div><h2>卡片分组</h2><p>编辑分组的名称、图标、显示方式和首页顺序</p></div><v-btn prepend-icon="mdi-plus" variant="outlined" @click="addGroup">添加分组</v-btn></div>
             <div class="group-editor-list">
               <div v-for="(group, groupIndex) in sortedGroups" :key="group.id" class="group-editor">
                 <div class="group-editor-head">
@@ -591,26 +446,6 @@ function logout() {
                     <v-btn icon="mdi-arrow-down" variant="text" :disabled="groupIndex === sortedGroups.length - 1" aria-label="分组下移" title="分组下移" @click="moveGroup(group, 1)" />
                     <v-btn icon="mdi-delete-outline" variant="text" color="error" aria-label="删除分组" title="删除分组" @click="removeGroup(group)" />
                   </div>
-                </div>
-                <div class="group-card-toolbar">
-                  <strong>卡片</strong>
-                  <v-btn prepend-icon="mdi-plus" variant="text" size="small" @click="newCard(group.id)">添加卡片</v-btn>
-                </div>
-                <div class="group-card-list">
-                  <div v-for="(card, cardIndex) in cardsForGroup(group.id)" :key="card.id" class="item-row group-card-row">
-                    <span class="item-icon">
-                      <img v-if="card.iconUrl" :src="appUrl(card.iconUrl)" alt="" />
-                      <v-icon v-else :icon="card.icon || 'mdi-web'" />
-                    </span>
-                    <div><strong>{{ card.title }}</strong><small>{{ cardTypeName(card.type) }} · {{ card.remark || '无备注' }}</small></div>
-                    <v-spacer />
-                    <v-switch v-model="card.enabled" color="primary" hide-details aria-label="显示卡片" />
-                    <v-btn icon="mdi-arrow-up" variant="text" :disabled="cardIndex === 0" aria-label="卡片上移" title="卡片上移" @click="moveCard(card, -1)" />
-                    <v-btn icon="mdi-arrow-down" variant="text" :disabled="cardIndex === cardsForGroup(group.id).length - 1" aria-label="卡片下移" title="卡片下移" @click="moveCard(card, 1)" />
-                    <v-btn icon="mdi-pencil-outline" variant="text" aria-label="编辑卡片" title="编辑卡片" @click="editCard(card)" />
-                    <v-btn icon="mdi-delete-outline" variant="text" color="error" aria-label="删除卡片" title="删除卡片" @click="removeCard(card)" />
-                  </div>
-                  <div v-if="!cardsForGroup(group.id).length" class="group-empty">暂无卡片</div>
                 </div>
               </div>
             </div>
@@ -737,76 +572,6 @@ function logout() {
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="cardDialog" max-width="720" scrollable>
-      <v-card v-if="editingCard">
-        <v-card-title>编辑卡片</v-card-title>
-        <v-card-text class="dialog-form">
-          <div class="form-grid">
-            <v-text-field v-model="editingCard.title" label="标题" />
-            <v-select v-model="editingCard.groupId" label="所属分组" :items="sortedGroups" item-title="title" item-value="id" />
-            <v-select v-model="editingCard.type" label="卡片类型" :items="cardTypes" @update:model-value="applyCardTypeDefaults" />
-            <v-text-field v-model="editingCard.icon" label="MDI 图标" />
-            <v-text-field v-model="editingCard.iconUrl" label="自定义图标 URL" />
-            <v-select v-model="editingCard.openTarget" label="打开方式" :items="[{title:'新窗口',value:'new'},{title:'当前窗口',value:'self'}]" />
-          </div>
-          <div class="icon-upload-row">
-            <span v-if="editingCard.iconUrl" class="icon-preview"><img :src="appUrl(editingCard.iconUrl)" alt="当前卡片图标" /></span>
-            <v-file-input
-              label="上传卡片图标"
-              accept="image/png,image/jpeg,image/gif,image/webp"
-              prepend-icon="mdi-image-plus-outline"
-              :loading="uploadingIcon"
-              hint="PNG、JPEG、GIF 或 WebP，最大 2 MB"
-              persistent-hint
-              @update:model-value="uploadIcon"
-            />
-          </div>
-          <v-text-field v-model="editingCard.remark" label="备注" />
-
-          <template v-if="editingCard.type === 'custom'">
-            <div class="custom-link-fields">
-              <v-text-field v-model="editingCard.custom.internalUrl" label="内网 URL" />
-              <v-text-field v-model="editingCard.custom.externalUrl" label="公网 URL" />
-              <v-btn prepend-icon="mdi-auto-fix" variant="outlined" :loading="loadingMetadata" @click="autoFillCustomCard">从链接自动补全</v-btn>
-            </div>
-          </template>
-          <template v-else-if="editingCard.type === 'system'">
-            <v-select v-model="editingCard.system.metric" label="系统信息" :items="[{title:'综合信息',value:'overview'},{title:'CPU',value:'cpu'},{title:'内存',value:'memory'},{title:'存储',value:'storage'},{title:'网络',value:'network'}]" />
-          </template>
-          <template v-else-if="editingCard.type === 'service'">
-            <v-select v-model="editingCard.service.serviceType" label="服务类型" :items="serviceTypes" @update:model-value="applyServiceDefaults" />
-            <p class="field-hint">{{ currentServiceAuthHint }}</p>
-            <div class="form-grid">
-              <v-text-field v-model="editingCard.service.internalUrl" label="内网 URL" />
-              <v-text-field v-model="editingCard.service.externalUrl" label="公网 URL" />
-            </div>
-            <v-text-field v-if="editingCard.service.serviceType === 'generic'" v-model="editingCard.service.statusUrl" label="状态检测 URL" />
-            <v-text-field v-if="editingCard.service.serviceType !== 'generic'" v-model="editingCard.service.token" label="API Key" type="password" autocomplete="new-password" />
-          </template>
-          <template v-else-if="editingCard.type === 'docker'">
-            <v-combobox
-              v-model="editingCard.docker.containerId"
-              label="容器 ID 或名称"
-              :items="dockerContainers"
-              item-title="label"
-              item-value="id"
-              :return-object="false"
-              hint="可从当前 Docker 容器中选择，也可手动填写"
-              persistent-hint
-            />
-            <div class="form-grid">
-              <v-text-field v-model="editingCard.docker.internalUrl" label="内网 URL" />
-              <v-text-field v-model="editingCard.docker.externalUrl" label="公网 URL" />
-            </div>
-          </template>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn @click="cardDialog = false">取消</v-btn>
-          <v-btn color="secondary" @click="commitCard">确定</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
   </main>
 </template>
 
@@ -847,11 +612,6 @@ function logout() {
 .group-editor-head { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 14px; }
 .group-fields { display: grid; grid-template-columns: minmax(150px,.8fr) minmax(150px,.8fr) minmax(210px,1fr); gap: 12px; }
 .group-actions { display: flex; align-items: center; gap: 2px; }
-.group-card-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding-left: 4px; }
-.group-card-toolbar strong { font-size: .83rem; letter-spacing: 0; }
-.group-card-list { display: grid; gap: 8px; }
-.group-card-row { padding-block: 9px; }
-.group-empty { min-height: 58px; display: grid; place-items: center; border: 1px dashed rgba(var(--v-theme-on-surface),.14); border-radius: 8px; color: rgba(var(--v-theme-on-surface),.5); font-size: .82rem; }
 .dialog-form { display: grid; gap: 4px; padding-top: 20px !important; }
 .background-upload { display: grid; grid-template-columns: minmax(180px, 320px) 1fr; align-items: center; gap: 18px; margin-bottom: 18px; }
 .background-preview { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; background-color: rgba(var(--v-theme-on-surface),.08); background-position: center; background-size: cover; }
@@ -870,12 +630,6 @@ function logout() {
 .scan-copy small { color: rgba(var(--v-theme-on-surface),.56); font-size: .75rem; }
 .scan-add-row { display: grid; grid-template-columns: minmax(190px, 1fr) auto; align-items: center; gap: 12px; margin-top: 8px; }
 .password-form { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)) auto; align-items: start; gap: 10px; }
-.icon-upload-row { display: flex; align-items: flex-start; gap: 14px; }
-.icon-upload-row > :last-child { flex: 1; }
-.icon-preview { display: grid; width: 56px; height: 56px; flex: 0 0 56px; place-items: center; overflow: hidden; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; }
-.field-hint { margin: -8px 0 12px; color: rgba(var(--v-theme-on-surface), .62); font-size: .78rem; line-height: 1.5; }
-.icon-preview img { width: 42px; height: 42px; object-fit: contain; }
-.custom-link-fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)) auto; align-items: start; gap: 16px; }
 @media (max-width: 820px) {
   .form-grid { grid-template-columns: 1fr; }
   .switch-grid { grid-template-columns: repeat(2, 1fr); }
@@ -884,7 +638,6 @@ function logout() {
   .password-form { grid-template-columns: 1fr 1fr; }
   .scan-controls { grid-template-columns: 1fr; }
   .background-upload { grid-template-columns: 1fr; }
-  .custom-link-fields { grid-template-columns: 1fr; }
   .group-editor-head { grid-template-columns: 1fr; }
   .group-fields { grid-template-columns: 1fr; }
   .group-actions { justify-content: flex-end; }
