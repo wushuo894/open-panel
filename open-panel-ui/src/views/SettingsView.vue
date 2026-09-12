@@ -19,8 +19,10 @@ const updateInfo = ref(null)
 const updateLoading = ref(false)
 const updateAutoChecked = ref(false)
 const uploadingBackground = ref(false)
+const usernameForm = ref({ newUsername: '', currentPassword: '' })
 const passwordForm = ref({ currentPassword: '', newPassword: '', confirmPassword: '' })
-const visibleSecrets = ref({ currentPassword: false, newPassword: false, confirmPassword: false, githubToken: false })
+const visibleSecrets = ref({ usernamePassword: false, currentPassword: false, newPassword: false, confirmPassword: false, githubToken: false })
+const changingUsername = ref(false)
 const changingPassword = ref(false)
 const currentPageHost = globalThis.location?.hostname?.replace(/^\[|\]$/g, '') || '127.0.0.1'
 const scanForm = ref({ target: currentPageHost, range: [80, 65535] })
@@ -78,6 +80,7 @@ async function load() {
       api('/api/admin/version')
     ])
     config.value = loadedConfig
+    usernameForm.value.newUsername = loadedConfig.security.username
     updateInfo.value = version
     scanGroupId.value = sortedGroups.value[0]?.id || ''
   }
@@ -292,6 +295,29 @@ async function changePassword() {
   finally { changingPassword.value = false }
 }
 
+async function changeUsername() {
+  changingUsername.value = true
+  error.value = ''
+  const username = usernameForm.value.newUsername.trim()
+  try {
+    await api('/api/admin/username', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword: usernameForm.value.currentPassword, newUsername: username })
+    })
+    try {
+      const key = 'open-panel-remembered-login'
+      const remembered = JSON.parse(localStorage.getItem(key) || '{}')
+      if (remembered?.password) localStorage.setItem(key, JSON.stringify({ ...remembered, username }))
+    } catch {
+      localStorage.removeItem('open-panel-remembered-login')
+    }
+    setToken('')
+    appState.auth.authenticated = false
+    router.replace('/login')
+  } catch (e) { error.value = e.message }
+  finally { changingUsername.value = false }
+}
+
 async function installUpdate() {
   updateLoading.value = true
   try {
@@ -492,6 +518,21 @@ function logout() {
             </div>
           </section>
           <section class="settings-section">
+            <div class="section-heading"><div><h2>管理员用户名</h2><p>修改后所有现有登录令牌立即失效</p></div></div>
+            <form class="username-form" @submit.prevent="changeUsername">
+              <v-text-field v-model="usernameForm.newUsername" label="新用户名" autocomplete="username" />
+              <v-text-field
+                v-model="usernameForm.currentPassword"
+                label="当前密码"
+                :type="visibleSecrets.usernamePassword ? 'text' : 'password'"
+                autocomplete="current-password"
+                :append-inner-icon="visibleSecrets.usernamePassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                @click:append-inner="visibleSecrets.usernamePassword = !visibleSecrets.usernamePassword"
+              />
+              <v-btn type="submit" variant="outlined" prepend-icon="mdi-account-edit-outline" :loading="changingUsername">修改用户名</v-btn>
+            </form>
+          </section>
+          <section class="settings-section">
             <div class="section-heading"><div><h2>管理员密码</h2><p>修改后所有现有登录令牌立即失效</p></div></div>
             <form class="password-form" @submit.prevent="changePassword">
               <v-text-field
@@ -654,12 +695,13 @@ function logout() {
 .scan-copy small { color: rgba(var(--v-theme-on-surface),.56); font-size: .75rem; }
 .scan-add-row { display: grid; grid-template-columns: minmax(190px, 1fr) auto; align-items: center; gap: 12px; margin-top: 8px; }
 .password-form { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)) auto; align-items: start; gap: 10px; }
+.username-form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)) auto; align-items: start; gap: 10px; }
 @media (max-width: 820px) {
   .form-grid { grid-template-columns: 1fr; }
   .switch-grid { grid-template-columns: repeat(2, 1fr); }
   .editable-row { align-items: stretch; flex-wrap: wrap; }
   .editable-row > :first-child, .editable-row > :nth-child(2), .editable-row > :nth-child(3) { flex: 1 1 220px; }
-  .password-form { grid-template-columns: 1fr 1fr; }
+  .password-form, .username-form { grid-template-columns: 1fr 1fr; }
   .scan-controls { grid-template-columns: 1fr; }
   .background-upload { grid-template-columns: 1fr; }
   .group-editor-head { grid-template-columns: 1fr; }
@@ -671,7 +713,7 @@ function logout() {
   .section-heading { align-items: flex-start; flex-direction: column; }
   .header-inner > div { display: none; }
   .item-row { flex-wrap: wrap; }
-  .password-form { grid-template-columns: 1fr; }
+  .password-form, .username-form { grid-template-columns: 1fr; }
   .scan-add-row { grid-template-columns: 1fr; }
   .scan-result { align-items: flex-start; flex-wrap: wrap; }
 }

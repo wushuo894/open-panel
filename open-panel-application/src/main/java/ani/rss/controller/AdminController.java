@@ -85,6 +85,12 @@ public class AdminController {
         return Result.ok();
     }
 
+    @PostMapping("/username")
+    public Result<Void> username(@RequestBody AuthPayloads.UsernameChange request) {
+        authService.changeUsername(request.getCurrentPassword(), request.getNewUsername());
+        return Result.ok();
+    }
+
     @GetMapping("/docker/containers")
     public Result<List<Map<String, Object>>> containers() {
         return Result.ok(statusService.containers());

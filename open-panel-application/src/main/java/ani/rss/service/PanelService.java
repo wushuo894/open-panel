@@ -47,6 +47,7 @@ public class PanelService {
         PanelConfig current = repository.get();
         if (next == null) throw new IllegalArgumentException("配置不能为空");
         if (next.getSecurity() == null) next.setSecurity(current.getSecurity());
+        next.getSecurity().setUsername(current.getSecurity().getUsername());
         next.getSecurity().setPasswordHash(current.getSecurity().getPasswordHash());
         next.getSecurity().setJwtSecret(current.getSecurity().getJwtSecret());
         next.getSecurity().setTokenVersion(current.getSecurity().getTokenVersion());

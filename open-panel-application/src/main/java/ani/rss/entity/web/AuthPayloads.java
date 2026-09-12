@@ -22,4 +22,11 @@ public final class AuthPayloads {
         private String currentPassword;
         private String newPassword;
     }
+
+    @Data
+    @Accessors(chain = true)
+    public static class UsernameChange implements Serializable {
+        private String currentPassword;
+        private String newUsername;
+    }
 }

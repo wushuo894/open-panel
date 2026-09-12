@@ -86,6 +86,24 @@ public class AuthService {
         });
     }
 
+    public void changeUsername(String currentPassword, String newUsername) {
+        PanelConfig.Security security = repository.get().getSecurity();
+        if (!passwordEncoder.matches(currentPassword, security.getPasswordHash())) {
+            throw new IllegalArgumentException("当前密码不正确");
+        }
+        validateUsername(newUsername);
+        String username = newUsername.trim();
+        if (security.getUsername().equals(username)) {
+            throw new IllegalArgumentException("新用户名不能与当前用户名相同");
+        }
+        repository.update(config -> {
+            config.getSecurity().setUsername(username);
+            config.getSecurity().setTokenVersion(config.getSecurity().getTokenVersion() + 1);
+            config.getSecurity().setActiveSessionId("");
+            config.getSecurity().getRevokedTokens().clear();
+        });
+    }
+
     private void registerFailure(String ip, PanelConfig.Security security, long now) {
         if (!security.isLimitLoginAttempts()) return;
         Attempts next = attempts.compute(ip, (ignored, previous) -> {
@@ -98,11 +116,15 @@ public class AuthService {
     }
 
     private void validateCredentials(String username, String password) {
-        if (username == null || username.trim().length() < 3 || username.trim().length() > 64) {
-            throw new IllegalArgumentException("用户名长度应为 3 到 64 个字符");
-        }
+        validateUsername(username);
         if (password == null || password.length() < 8 || password.length() > 128) {
             throw new IllegalArgumentException("密码长度应为 8 到 128 个字符");
+        }
+    }
+
+    private void validateUsername(String username) {
+        if (username == null || username.trim().length() < 3 || username.trim().length() > 64) {
+            throw new IllegalArgumentException("用户名长度应为 3 到 64 个字符");
         }
     }
 
