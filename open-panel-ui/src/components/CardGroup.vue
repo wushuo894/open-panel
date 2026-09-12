@@ -259,6 +259,7 @@ async function controlDocker(card, action) {
 }
 .cover .nav-card { border-color: rgba(255,255,255,.22); background: rgba(21,26,25,.5); color: white; }
 .nav-card:hover { transform: translateY(-2px); border-color: rgba(var(--v-theme-primary), .28); box-shadow: 0 9px 26px rgba(17,24,20,.12); }
+.nav-card[role="link"], .nav-card[role="link"] * { cursor: pointer; }
 .nav-card:focus-visible { outline: 2px solid rgb(var(--v-theme-primary)); outline-offset: 2px; }
 .nav-card.not-clickable { cursor: default; opacity: 1; }
 .nav-card.not-clickable:hover { transform: none; border-color: rgba(var(--v-theme-on-surface), .09); box-shadow: none; }
