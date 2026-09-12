@@ -109,7 +109,7 @@ function newCard(groupId) {
     id: uuid(), groupId, type: 'custom', title: '新卡片', remark: '', icon: 'mdi-web', iconUrl: '', enabled: true,
     sort: cardsFor({ id: groupId }).length, openTarget: 'new',
     custom: { internalUrl: '', externalUrl: '' },
-    system: { metric: 'overview' },
+    system: { metric: 'overview', storagePath: '.' },
     service: { serviceType: 'generic', internalUrl: '', externalUrl: '', statusUrl: '', token: '' },
     docker: { containerId: '', internalUrl: '', externalUrl: '' }
   }

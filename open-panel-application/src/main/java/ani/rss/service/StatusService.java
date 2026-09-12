@@ -15,10 +15,12 @@ import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
 import oshi.SystemInfo;
 import oshi.hardware.CentralProcessor;
 import oshi.hardware.GlobalMemory;
-import oshi.hardware.HWDiskStore;
 import oshi.hardware.NetworkIF;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.FileStore;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.Duration;
 import java.time.format.DateTimeParseException;
@@ -64,7 +66,8 @@ public class StatusService {
             for (PanelConfig.Card card : config.getCards()) {
                 if (!card.isEnabled()) continue;
                 if ("system".equals(card.getType())) {
-                    result.put(card.getId(), system);
+                    boolean storage = card.getSystem() != null && "storage".equals(card.getSystem().getMetric());
+                    result.put(card.getId(), storage ? storageStatus(card.getSystem()) : system);
                 } else if ("docker".equals(card.getType()) && card.getDocker() != null) {
                     result.put(card.getId(), docker.getOrDefault(card.getDocker().getContainerId(), offline("未找到容器")));
                 } else if ("service".equals(card.getType()) && card.getService() != null) {
@@ -137,7 +140,6 @@ public class StatusService {
         double cpu = processor.getSystemCpuLoadBetweenTicks(previousCpuTicks) * 100;
         previousCpuTicks = processor.getSystemCpuLoadTicks();
         GlobalMemory memory = hardware.getMemory();
-        long diskTotal = hardware.getDiskStores().stream().mapToLong(HWDiskStore::getSize).sum();
         long receive = 0;
         long sent = 0;
         for (NetworkIF network : hardware.getNetworkIFs()) {
@@ -150,9 +152,31 @@ public class StatusService {
         value.put("cpuPercent", Math.round(Math.max(0, cpu) * 10) / 10.0);
         value.put("memoryUsed", memory.getTotal() - memory.getAvailable());
         value.put("memoryTotal", memory.getTotal());
-        value.put("diskTotal", diskTotal);
         value.put("networkReceived", receive);
         value.put("networkSent", sent);
+        return value;
+    }
+
+    private Map<String, Object> storageStatus(PanelConfig.SystemCard systemCard) {
+        String configuredPath = systemCard.getStoragePath();
+        if (configuredPath == null || configuredPath.isBlank()) configuredPath = ".";
+        Map<String, Object> value = new LinkedHashMap<>();
+        try {
+            Path path = Path.of(configuredPath).toAbsolutePath().normalize();
+            if (!Files.isDirectory(path)) throw new IllegalArgumentException("文件夹不存在");
+            FileStore store = Files.getFileStore(path);
+            long total = store.getTotalSpace();
+            long available = store.getUsableSpace();
+            value.put("online", true);
+            value.put("diskPath", path.toString());
+            value.put("diskUsed", Math.max(0, total - available));
+            value.put("diskAvailable", available);
+            value.put("diskTotal", total);
+        } catch (Exception exception) {
+            value.put("online", false);
+            value.put("diskPath", configuredPath);
+            value.put("status", "无法读取路径: " + safeMessage(exception));
+        }
         return value;
     }
 

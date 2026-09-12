@@ -151,6 +151,7 @@ public class PanelConfig implements Serializable {
     @Accessors(chain = true)
     public static class SystemCard implements Serializable {
         private String metric = "overview";
+        private String storagePath = ".";
     }
 
     @Data

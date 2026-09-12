@@ -57,7 +57,8 @@ watch(() => props.modelValue, value => {
 
 function normalizeCard(card) {
   card.custom ||= { internalUrl: '', externalUrl: '' }
-  card.system ||= { metric: 'overview' }
+  card.system ||= { metric: 'overview', storagePath: '.' }
+  card.system.storagePath ||= '.'
   card.service ||= { serviceType: 'generic', internalUrl: '', externalUrl: '', statusUrl: '', token: '' }
   card.docker ||= { containerId: '', internalUrl: '', externalUrl: '' }
   return card
@@ -200,6 +201,14 @@ async function uploadIcon(value) {
         </template>
         <template v-else-if="draft.type === 'system'">
           <v-select v-model="draft.system.metric" label="系统信息" :items="[{title:'综合信息',value:'overview'},{title:'CPU',value:'cpu'},{title:'内存',value:'memory'},{title:'存储',value:'storage'},{title:'网络',value:'network'}]" />
+          <v-text-field
+            v-if="draft.system.metric === 'storage'"
+            v-model="draft.system.storagePath"
+            label="文件夹路径"
+            placeholder="/downloads"
+            hint="显示该路径所在分区的已用容量和总容量；Docker 部署时填写容器内路径"
+            persistent-hint
+          />
         </template>
         <template v-else-if="draft.type === 'service'">
           <v-select v-model="draft.service.serviceType" label="服务类型" :items="serviceTypes" @update:model-value="applyServiceDefaults" />

@@ -58,11 +58,12 @@ function bytes(value) {
 function systemMetric(card) {
   const status = props.statuses[card.id]
   if (!status) return ''
+  if (status.online === false) return status.status || '无法获取系统信息'
   switch (card.system?.metric) {
     case 'cpu': return `使用率 ${status.cpuPercent ?? 0}%`
     case 'memory': return `${bytes(status.memoryUsed)} / ${bytes(status.memoryTotal)}`
     case 'network': return `接收 ${bytes(status.networkReceived)} · 发送 ${bytes(status.networkSent)}`
-    case 'storage': return `总容量 ${bytes(status.diskTotal)}`
+    case 'storage': return `${bytes(status.diskUsed)} / ${bytes(status.diskTotal)}`
     default: return `CPU ${status.cpuPercent ?? 0}% · 内存 ${bytes(status.memoryUsed)}`
   }
 }
