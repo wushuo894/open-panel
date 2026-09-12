@@ -24,8 +24,11 @@ jobs:
           version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout -f pom.xml)
           echo "version=v$version" >> $GITHUB_ENV
       - name: Publish release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
+          name: ${{ env.version }}
+          tag_name: ${{ env.version }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: open-panel-application/target/open-panel.jar
       - uses: docker/login-action@v3
         with:
