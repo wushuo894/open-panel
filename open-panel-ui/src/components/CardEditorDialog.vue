@@ -163,7 +163,7 @@ async function uploadIcon(value) {
 </script>
 
 <template>
-  <v-dialog :model-value="modelValue" max-width="720" scrollable @update:model-value="value => emit('update:modelValue', value)">
+  <v-dialog :model-value="modelValue" max-width="720" scrollable persistent @update:model-value="value => emit('update:modelValue', value)">
     <v-card v-if="draft">
       <v-card-title>卡片设置</v-card-title>
       <v-card-text class="dialog-form">
