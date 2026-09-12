@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { api, getToken, setToken } from '../lib/api'
 import { appUrl } from '../lib/paths'
 import { appState } from '../stores/app'
+import MdiIconPicker from '../components/MdiIconPicker.vue'
 
 const router = useRouter()
 const tab = ref('appearance')
@@ -464,7 +465,7 @@ function logout() {
                 <div class="group-editor-head">
                   <div class="group-fields">
                     <v-text-field v-model="group.title" label="分组名称" hide-details />
-                    <v-text-field v-model="group.icon" label="MDI 图标" hide-details />
+                    <MdiIconPicker v-model="group.icon" hide-details />
                     <v-select v-model="group.displayMode" label="卡片显示" :items="[{title:'标题、图标、备注',value:'detail'},{title:'只显示图标',value:'icon'}]" hide-details />
                   </div>
                   <div class="group-actions">
@@ -483,7 +484,7 @@ function logout() {
             <div class="editable-list">
               <div v-for="engine in config.searchEngines" :key="engine.id" class="editable-row engine-row">
                 <v-text-field v-model="engine.name" label="名称" hide-details />
-                <v-text-field v-model="engine.icon" label="MDI 图标" hide-details />
+                <MdiIconPicker v-model="engine.icon" hide-details />
                 <v-text-field v-model="engine.urlTemplate" label="搜索 URL 模板" hide-details />
                 <v-switch v-model="engine.enabled" label="启用" color="primary" hide-details />
                 <v-btn icon="mdi-delete-outline" variant="text" color="error" aria-label="删除引擎" @click="removeEngine(engine)" />
@@ -621,7 +622,7 @@ function logout() {
         <v-card-title>添加分组</v-card-title>
         <v-card-text class="dialog-form">
           <v-text-field v-model="groupDraft.title" label="分组名称" autofocus @keydown.enter="commitGroup" />
-          <v-text-field v-model="groupDraft.icon" label="MDI 图标" prepend-inner-icon="mdi-shape-outline" />
+          <MdiIconPicker v-model="groupDraft.icon" />
           <v-select
             v-model="groupDraft.displayMode"
             label="卡片显示方式"

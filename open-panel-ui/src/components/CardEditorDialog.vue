@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { api } from '../lib/api'
 import { appUrl } from '../lib/paths'
+import MdiIconPicker from './MdiIconPicker.vue'
 
 const props = defineProps({
   modelValue: Boolean,
@@ -175,7 +176,7 @@ async function uploadIcon(value) {
           <v-text-field v-model="draft.title" label="标题" />
           <v-select v-model="draft.groupId" label="所属分组" :items="groups" item-title="title" item-value="id" />
           <v-select :model-value="draft.type" label="卡片类型" :items="cardTypes" @update:model-value="changeCardType" />
-          <v-text-field v-model="draft.icon" label="MDI 图标" />
+          <MdiIconPicker v-model="draft.icon" />
           <v-text-field v-model="draft.iconUrl" label="自定义图标 URL" />
           <v-select v-model="draft.openTarget" label="打开方式" :items="[{title:'新窗口',value:'new'},{title:'当前窗口',value:'self'}]" />
         </div>
