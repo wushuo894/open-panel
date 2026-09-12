@@ -44,6 +44,7 @@ function search() {
   border: 1px solid rgba(var(--v-theme-on-surface), .12);
   border-radius: 8px;
   background: rgb(var(--v-theme-surface));
+  color: rgb(var(--v-theme-on-surface));
   box-shadow: 0 10px 35px rgba(22,29,25,.10);
 }
 .search-bar.glass { border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.88); color: #151a18; backdrop-filter: blur(18px); }
