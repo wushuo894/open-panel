@@ -9,6 +9,7 @@ export const appState = reactive({
   loading: false,
   error: ''
 })
+let statusGeneration = 0
 
 export async function loadAuth() {
   appState.auth = await api('/api/auth/status')
@@ -28,12 +29,18 @@ export async function loadPanel() {
   }
 }
 
-export async function loadStatuses() {
-  try {
-    appState.statuses = await api('/api/public/card-status')
-  } catch {
-    appState.statuses = {}
-  }
+export function loadStatuses() {
+  const generation = ++statusGeneration
+  appState.statuses = {}
+  const paths = [
+    '/api/public/system-status',
+    '/api/public/service-status',
+    '/api/public/docker-status'
+  ]
+  return Promise.allSettled(paths.map(path => api(path).then(statuses => {
+    if (generation !== statusGeneration) return
+    appState.statuses = { ...appState.statuses, ...statuses }
+  })))
 }
 
 export function changeNetwork(network) {

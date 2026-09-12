@@ -51,35 +51,51 @@ public class StatusService {
         previousCpuTicks = systemInfo.getHardware().getProcessor().getSystemCpuLoadTicks();
     }
 
-    public Map<String, Object> statuses() {
+    public Map<String, Object> systemStatuses() {
         PanelConfig config = repository.get();
-        Map<String, Future<Map<String, Object>>> serviceFutures = new LinkedHashMap<>();
-        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            config.getCards().stream()
-                    .filter(card -> card.isEnabled() && "service".equals(card.getType()) && card.getService() != null)
-                    .forEach(card -> serviceFutures.put(card.getId(),
-                            executor.submit(() -> softwareServiceStatusService.status(card.getService()))));
+        List<PanelConfig.Card> cards = config.getCards().stream()
+                .filter(card -> card.isEnabled() && "system".equals(card.getType()))
+                .toList();
+        boolean commonStatusNeeded = cards.stream()
+                .anyMatch(card -> card.getSystem() == null || !"storage".equals(card.getSystem().getMetric()));
+        Map<String, Object> commonStatus = commonStatusNeeded ? systemStatus() : Map.of();
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (PanelConfig.Card card : cards) {
+            boolean storage = card.getSystem() != null && "storage".equals(card.getSystem().getMetric());
+            result.put(card.getId(), storage ? storageStatus(card.getSystem()) : commonStatus);
+        }
+        return result;
+    }
 
-            Map<String, Object> system = systemStatus();
-            Map<String, Map<String, Object>> docker = dockerStatuses(config.getCards());
+    public Map<String, Object> serviceStatuses() {
+        List<PanelConfig.Card> cards = repository.get().getCards().stream()
+                .filter(card -> card.isEnabled() && "service".equals(card.getType()) && card.getService() != null)
+                .toList();
+        Map<String, Future<Map<String, Object>>> futures = new LinkedHashMap<>();
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            cards.forEach(card -> futures.put(card.getId(),
+                    executor.submit(() -> softwareServiceStatusService.status(card.getService()))));
             Map<String, Object> result = new LinkedHashMap<>();
-            for (PanelConfig.Card card : config.getCards()) {
-                if (!card.isEnabled()) continue;
-                if ("system".equals(card.getType())) {
-                    boolean storage = card.getSystem() != null && "storage".equals(card.getSystem().getMetric());
-                    result.put(card.getId(), storage ? storageStatus(card.getSystem()) : system);
-                } else if ("docker".equals(card.getType()) && card.getDocker() != null) {
-                    result.put(card.getId(), docker.getOrDefault(card.getDocker().getContainerId(), offline("未找到容器")));
-                } else if ("service".equals(card.getType()) && card.getService() != null) {
-                    try {
-                        result.put(card.getId(), serviceFutures.get(card.getId()).get());
-                    } catch (Exception exception) {
-                        result.put(card.getId(), offline("连接失败"));
-                    }
+            for (PanelConfig.Card card : cards) {
+                try {
+                    result.put(card.getId(), futures.get(card.getId()).get());
+                } catch (Exception exception) {
+                    result.put(card.getId(), offline("连接失败"));
                 }
             }
             return result;
         }
+    }
+
+    public Map<String, Object> dockerStatuses() {
+        List<PanelConfig.Card> cards = repository.get().getCards();
+        Map<String, Map<String, Object>> containerStatuses = collectDockerStatuses(cards);
+        Map<String, Object> result = new LinkedHashMap<>();
+        cards.stream()
+                .filter(card -> card.isEnabled() && "docker".equals(card.getType()) && card.getDocker() != null)
+                .forEach(card -> result.put(card.getId(), containerStatuses.getOrDefault(
+                        card.getDocker().getContainerId(), offline("未找到容器"))));
+        return result;
     }
 
     public List<Map<String, Object>> containers() {
@@ -180,7 +196,7 @@ public class StatusService {
         return value;
     }
 
-    private Map<String, Map<String, Object>> dockerStatuses(List<PanelConfig.Card> cards) {
+    private Map<String, Map<String, Object>> collectDockerStatuses(List<PanelConfig.Card> cards) {
         boolean needed = cards.stream().anyMatch(card -> card.isEnabled() && "docker".equals(card.getType()));
         if (!needed) return Map.of();
         Map<String, Map<String, Object>> result = new HashMap<>();

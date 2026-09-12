@@ -38,8 +38,18 @@ public class PublicController {
         return Result.ok(panelService.publicConfig(network, privateClient));
     }
 
-    @GetMapping("/card-status")
-    public Result<Map<String, Object>> cardStatus() {
-        return Result.ok(statusService.statuses());
+    @GetMapping("/system-status")
+    public Result<Map<String, Object>> systemStatus() {
+        return Result.ok(statusService.systemStatuses());
+    }
+
+    @GetMapping("/service-status")
+    public Result<Map<String, Object>> serviceStatus() {
+        return Result.ok(statusService.serviceStatuses());
+    }
+
+    @GetMapping("/docker-status")
+    public Result<Map<String, Object>> dockerStatus() {
+        return Result.ok(statusService.dockerStatuses());
     }
 }
