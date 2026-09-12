@@ -15,6 +15,7 @@ const uploadingIcon = ref(false)
 const loadingMetadata = ref(false)
 const dockerContainers = ref([])
 const error = ref('')
+const showServiceToken = ref(false)
 
 const cardTypes = [
   { title: '自定义链接', value: 'custom' },
@@ -49,6 +50,7 @@ watch(() => props.card, value => {
   }
   draft.value = normalizeCard(JSON.parse(JSON.stringify(value)))
   error.value = ''
+  showServiceToken.value = false
 }, { immediate: true })
 
 watch(() => props.modelValue, value => {
@@ -218,7 +220,15 @@ async function uploadIcon(value) {
             <v-text-field v-model="draft.service.externalUrl" label="公网 URL" />
           </div>
           <v-text-field v-if="draft.service.serviceType === 'generic'" v-model="draft.service.statusUrl" label="状态检测 URL" />
-          <v-text-field v-else v-model="draft.service.token" label="API Key" type="password" autocomplete="new-password" />
+          <v-text-field
+            v-else
+            v-model="draft.service.token"
+            label="API Key"
+            :type="showServiceToken ? 'text' : 'password'"
+            autocomplete="new-password"
+            :append-inner-icon="showServiceToken ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+            @click:append-inner="showServiceToken = !showServiceToken"
+          />
         </template>
         <template v-else-if="draft.type === 'docker'">
           <v-combobox

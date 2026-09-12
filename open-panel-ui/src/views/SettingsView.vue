@@ -20,6 +20,7 @@ const updateLoading = ref(false)
 const updateAutoChecked = ref(false)
 const uploadingBackground = ref(false)
 const passwordForm = ref({ currentPassword: '', newPassword: '', confirmPassword: '' })
+const visibleSecrets = ref({ currentPassword: false, newPassword: false, confirmPassword: false, githubToken: false })
 const changingPassword = ref(false)
 const currentPageHost = globalThis.location?.hostname?.replace(/^\[|\]$/g, '') || '127.0.0.1'
 const scanForm = ref({ target: currentPageHost, range: [80, 65535] })
@@ -493,9 +494,30 @@ function logout() {
           <section class="settings-section">
             <div class="section-heading"><div><h2>管理员密码</h2><p>修改后所有现有登录令牌立即失效</p></div></div>
             <form class="password-form" @submit.prevent="changePassword">
-              <v-text-field v-model="passwordForm.currentPassword" label="当前密码" type="password" autocomplete="current-password" />
-              <v-text-field v-model="passwordForm.newPassword" label="新密码" type="password" autocomplete="new-password" />
-              <v-text-field v-model="passwordForm.confirmPassword" label="确认新密码" type="password" autocomplete="new-password" />
+              <v-text-field
+                v-model="passwordForm.currentPassword"
+                label="当前密码"
+                :type="visibleSecrets.currentPassword ? 'text' : 'password'"
+                autocomplete="current-password"
+                :append-inner-icon="visibleSecrets.currentPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                @click:append-inner="visibleSecrets.currentPassword = !visibleSecrets.currentPassword"
+              />
+              <v-text-field
+                v-model="passwordForm.newPassword"
+                label="新密码"
+                :type="visibleSecrets.newPassword ? 'text' : 'password'"
+                autocomplete="new-password"
+                :append-inner-icon="visibleSecrets.newPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                @click:append-inner="visibleSecrets.newPassword = !visibleSecrets.newPassword"
+              />
+              <v-text-field
+                v-model="passwordForm.confirmPassword"
+                label="确认新密码"
+                :type="visibleSecrets.confirmPassword ? 'text' : 'password'"
+                autocomplete="new-password"
+                :append-inner-icon="visibleSecrets.confirmPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                @click:append-inner="visibleSecrets.confirmPassword = !visibleSecrets.confirmPassword"
+              />
               <v-btn type="submit" variant="outlined" prepend-icon="mdi-lock-reset" :loading="changingPassword">修改密码</v-btn>
             </form>
           </section>
@@ -518,12 +540,14 @@ function logout() {
             <v-text-field
               v-model="config.update.githubToken"
               label="GitHub Token"
-              type="password"
+              :type="visibleSecrets.githubToken ? 'text' : 'password'"
               autocomplete="off"
               prepend-inner-icon="mdi-github"
+              :append-inner-icon="visibleSecrets.githubToken ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
               hint="可选，仅用于 GitHub API 更新检查，避免匿名请求受 IP 频率限制"
               persistent-hint
               class="update-token"
+              @click:append-inner="visibleSecrets.githubToken = !visibleSecrets.githubToken"
             />
             <div class="update-row">
               <div><strong>Open Panel <span v-if="updateInfo?.currentVersion" class="version-badge">v{{ updateInfo.currentVersion }}</span></strong><small v-if="updateInfo?.latestVersion">当前 {{ updateInfo.currentVersion }} · 最新 {{ updateInfo.latestVersion }}</small><small v-else>尚未检查更新</small></div>
