@@ -12,6 +12,8 @@ const loading = ref(true)
 const saving = ref(false)
 const message = ref('')
 const error = ref('')
+const groupDialog = ref(false)
+const groupDraft = ref(null)
 const cardDialog = ref(false)
 const editingCard = ref(null)
 const editingOriginalGroupId = ref('')
@@ -181,7 +183,27 @@ function moveCard(card, direction) {
 }
 
 function addGroup() {
-  config.value.groups.push({ id: uuid(), title: '新分组', icon: 'mdi-folder-outline', displayMode: 'detail', enabled: true, sort: sortedGroups.value.length })
+  groupDraft.value = {
+    id: uuid(),
+    title: '',
+    icon: 'mdi-folder-outline',
+    displayMode: 'detail',
+    enabled: true,
+    sort: sortedGroups.value.length
+  }
+  groupDialog.value = true
+}
+
+function commitGroup() {
+  const title = groupDraft.value?.title?.trim()
+  if (!title) return
+  groupDraft.value.title = title
+  groupDraft.value.icon = groupDraft.value.icon?.trim() || 'mdi-folder-outline'
+  config.value.groups.push(groupDraft.value)
+  if (!scanGroupId.value) scanGroupId.value = groupDraft.value.id
+  groupDialog.value = false
+  groupDraft.value = null
+  message.value = `已添加分组“${title}”，保存后生效`
 }
 
 function removeGroup(group) {
@@ -692,6 +714,27 @@ function logout() {
         </v-window-item>
       </v-window>
     </div>
+
+    <v-dialog v-model="groupDialog" max-width="480">
+      <v-card v-if="groupDraft">
+        <v-card-title>添加分组</v-card-title>
+        <v-card-text class="dialog-form">
+          <v-text-field v-model="groupDraft.title" label="分组名称" autofocus @keydown.enter="commitGroup" />
+          <v-text-field v-model="groupDraft.icon" label="MDI 图标" prepend-inner-icon="mdi-shape-outline" />
+          <v-select
+            v-model="groupDraft.displayMode"
+            label="卡片显示方式"
+            :items="[{title:'标题、图标、备注',value:'detail'},{title:'只显示图标',value:'icon'}]"
+          />
+          <v-switch v-model="groupDraft.enabled" label="在首页显示" color="primary" hide-details />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="groupDialog = false">取消</v-btn>
+          <v-btn color="secondary" :disabled="!groupDraft.title?.trim()" @click="commitGroup">添加</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <v-dialog v-model="cardDialog" max-width="720" scrollable>
       <v-card v-if="editingCard">
