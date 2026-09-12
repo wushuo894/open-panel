@@ -95,6 +95,18 @@ function applyCardTypeDefaults(type) {
   }
 }
 
+function changeCardType(type) {
+  const previousType = draft.value.type
+  const previousSource = draft.value[previousType]
+  const internalUrl = previousSource?.internalUrl || ''
+  const externalUrl = previousSource?.externalUrl || ''
+  applyCardTypeDefaults(type)
+  const nextSource = draft.value[type]
+  if (!nextSource) return
+  if (!nextSource.internalUrl && internalUrl) nextSource.internalUrl = internalUrl
+  if (!nextSource.externalUrl && externalUrl) nextSource.externalUrl = externalUrl
+}
+
 function applyServiceDefaults(type) {
   draft.value.service.serviceType = type
   const [title, icon, remark] = serviceDefaults[type] || serviceDefaults.generic
@@ -159,7 +171,7 @@ async function uploadIcon(value) {
         <div class="form-grid">
           <v-text-field v-model="draft.title" label="标题" />
           <v-select v-model="draft.groupId" label="所属分组" :items="groups" item-title="title" item-value="id" />
-          <v-select v-model="draft.type" label="卡片类型" :items="cardTypes" @update:model-value="applyCardTypeDefaults" />
+          <v-select :model-value="draft.type" label="卡片类型" :items="cardTypes" @update:model-value="changeCardType" />
           <v-text-field v-model="draft.icon" label="MDI 图标" />
           <v-text-field v-model="draft.iconUrl" label="自定义图标 URL" />
           <v-select v-model="draft.openTarget" label="打开方式" :items="[{title:'新窗口',value:'new'},{title:'当前窗口',value:'self'}]" />
