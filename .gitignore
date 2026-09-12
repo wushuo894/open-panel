@@ -4,7 +4,7 @@ target/
 **/dist/
 open-panel-ui/node/
 .pnpm-store/
-config/
+/config
 *.log
 .env
 !.mvn/wrapper/maven-wrapper.jar
