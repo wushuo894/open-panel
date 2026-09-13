@@ -133,6 +133,7 @@ public class PanelConfig implements Serializable {
         private String remark = "";
         private String icon = "mdi-web";
         private String iconUrl = "";
+        private boolean iconFrameless;
         private boolean enabled = true;
         private int sort;
         private String openTarget = "new";
