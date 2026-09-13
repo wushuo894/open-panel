@@ -3,10 +3,12 @@ package ani.rss.service;
 import ani.rss.entity.PanelConfig;
 import ani.rss.entity.web.DockerUpdateModels;
 import ani.rss.repository.JsonConfigRepository;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.command.InspectImageResponse;
 import com.github.dockerjava.api.model.AccessMode;
 import com.github.dockerjava.api.model.AuthConfig;
 import com.github.dockerjava.api.model.Bind;
@@ -20,7 +22,9 @@ import com.github.dockerjava.api.model.Volume;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
+import com.github.dockerjava.core.RemoteApiVersion;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
+import com.github.dockerjava.transport.DockerHttpClient;
 import jakarta.annotation.PreDestroy;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -30,11 +34,14 @@ import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.Closeable;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -62,6 +69,7 @@ public class DockerUpdateService {
     private final Map<String, JobState> jobs = new ConcurrentHashMap<>();
     private final Set<String> checkedImages = ConcurrentHashMap.newKeySet();
     private final Map<String, String> imageCheckErrors = new ConcurrentHashMap<>();
+    private final Map<String, String> remoteImageDigests = new ConcurrentHashMap<>();
     private final Map<String, StagedImage> stagedImages = new ConcurrentHashMap<>();
     private final AtomicReference<String> activeJobId = new AtomicReference<>();
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -74,12 +82,12 @@ public class DockerUpdateService {
         DockerUpdateModels.DockerOverview result = new DockerUpdateModels.DockerOverview();
         try (DockerConnection connection = connect(Duration.ofSeconds(8))) {
             connection.client().pingCmd().exec();
-            Map<String, String> latestIds = new ConcurrentHashMap<>();
+            Map<String, Set<String>> localDigestCache = new ConcurrentHashMap<>();
             List<DockerUpdateModels.ContainerInfo> containers = connection.client().listContainersCmd()
                     .withShowAll(true)
                     .exec()
                     .stream()
-                    .map(container -> containerInfo(connection.client(), container, latestIds))
+                    .map(container -> containerInfo(connection.client(), container, localDigestCache))
                     .sorted(Comparator.comparing(DockerUpdateModels.ContainerInfo::getName, String.CASE_INSENSITIVE_ORDER))
                     .toList();
             result.setAvailable(true).setContainers(containers).setActiveJob(activeJob());
@@ -115,6 +123,7 @@ public class DockerUpdateService {
             stagedImages.clear();
             checkedImages.clear();
             imageCheckErrors.clear();
+            remoteImageDigests.clear();
             return new DockerUpdateModels.ImageCleanupResult()
                     .setDeletedImages(Math.max(0, before - after))
                     .setSpaceReclaimed(result.getSpaceReclaimed() == null ? 0 : result.getSpaceReclaimed());
@@ -385,21 +394,26 @@ public class DockerUpdateService {
             for (Map.Entry<String, String> entry : images.entrySet()) {
                 String image = entry.getKey();
                 checkCancelled(state);
-                int currentIndex = index;
-                state.job.setImage(image).setPhase("pulling");
-                log(state, "info", "检查镜像 " + image);
+                state.job.setImage(image).setPhase("checking");
+                log(state, "info", "查询远端镜像摘要 " + image);
                 try {
-                    StagedImage staged = stageImage(connection, image, entry.getValue(), state, pullProgress ->
-                            state.job.setProgress(Math.min(99, Math.round((currentIndex + pullProgress / 100f) * 100 / images.size()))));
+                    String remoteDigest = inspectRemoteDigest(connection, image);
+                    Set<String> localDigests = inspectLocalDigests(docker, image);
+                    if (localDigests.isEmpty()) {
+                        throw new IllegalStateException("本地镜像没有仓库摘要，无法判断是否有更新");
+                    }
+                    boolean updateAvailable = !localDigests.contains(remoteDigest);
                     checkedImages.add(image);
                     imageCheckErrors.remove(image);
-                    log(state, "success", sameImage(entry.getValue(), staged.newImageId())
-                            ? "镜像已是最新 " + image
-                            : "发现新镜像 " + image + " · " + shortId(staged.newImageId()));
+                    remoteImageDigests.put(image, remoteDigest);
+                    log(state, "success", updateAvailable
+                            ? "发现新镜像 " + image + " · " + shortId(remoteDigest)
+                            : "镜像已是最新 " + image);
                 } catch (JobCancelledException exception) {
                     throw exception;
                 } catch (Exception exception) {
                     checkedImages.add(image);
+                    remoteImageDigests.remove(image);
                     String message = safeMessage(exception);
                     imageCheckErrors.put(image, message);
                     log(state, "error", image + "：" + message);
@@ -735,14 +749,20 @@ public class DockerUpdateService {
     }
 
     private DockerUpdateModels.ContainerInfo containerInfo(DockerClient docker, Container container,
-                                                            Map<String, String> latestIds) {
+                                                            Map<String, Set<String>> localDigestCache) {
         InspectContainerResponse inspect = inspectContainer(docker, container.getId());
         String image = resolveContainerImage(docker, container, inspect);
         StagedImage staged = stagedImages.get(image);
         String latestId = staged != null ? staged.newImageId()
-                : image.isBlank() ? "" : latestIds.computeIfAbsent(image, key -> inspectImageId(docker, key));
+                : remoteImageDigests.getOrDefault(image, "");
         String reason = updateBlockReason(container, inspect, image);
         boolean checked = checkedImages.contains(image);
+        boolean updateAvailable = false;
+        if (checked && notBlank(latestId) && !imageCheckErrors.containsKey(image)) {
+            updateAvailable = staged != null
+                    ? !sameImage(container.getImageId(), latestId)
+                    : !localDigestCache.computeIfAbsent(image, key -> inspectLocalDigests(docker, key)).contains(latestId);
+        }
         long uptimeSeconds = inspect == null || inspect.getState() == null
                 || !Boolean.TRUE.equals(inspect.getState().getRunning())
                 ? 0 : uptimeSeconds(inspect.getState().getStartedAt());
@@ -756,11 +776,62 @@ public class DockerUpdateService {
                 .setStatus(container.getStatus())
                 .setUptimeSeconds(uptimeSeconds)
                 .setUpdateChecked(checked)
-                .setUpdateAvailable(checked && notBlank(latestId) && !sameImage(container.getImageId(), latestId))
+                .setUpdateAvailable(updateAvailable)
                 .setUpdatable(reason.isBlank())
                 .setSelf(isSelf(container))
                 .setReason(reason)
                 .setCheckError(imageCheckErrors.getOrDefault(image, ""));
+    }
+
+    private String inspectRemoteDigest(DockerConnection connection, String image) {
+        DockerClientConfig config = connection.config();
+        String path = "/distribution/" + URLEncoder.encode(image, StandardCharsets.UTF_8).replace("+", "%20") + "/json";
+        RemoteApiVersion apiVersion = config.getApiVersion();
+        if (apiVersion != null && !RemoteApiVersion.UNKNOWN_VERSION.equals(apiVersion)) {
+            path = '/' + apiVersion.asWebPathPart() + path;
+        }
+        DockerHttpClient.Request.Builder request = DockerHttpClient.Request.builder()
+                .method(DockerHttpClient.Request.Method.GET)
+                .path(path);
+        AuthConfig auth = config.effectiveAuthConfig(image);
+        if (auth != null) {
+            try {
+                request.putHeader("X-Registry-Auth", Base64.getUrlEncoder().encodeToString(
+                        config.getObjectMapper().writeValueAsBytes(auth)));
+            } catch (Exception exception) {
+                throw new IllegalStateException("读取镜像仓库认证信息失败: " + safeMessage(exception), exception);
+            }
+        }
+        try (DockerHttpClient.Response response = connection.transport().execute(request.build())) {
+            byte[] content = response.getBody().readAllBytes();
+            JsonNode body = content.length == 0 ? null : config.getObjectMapper().readTree(content);
+            if (response.getStatusCode() < 200 || response.getStatusCode() >= 300) {
+                String message = body == null ? "" : body.path("message").asText("");
+                throw new IllegalStateException(notBlank(message)
+                        ? message : "Docker 镜像摘要查询失败 (HTTP " + response.getStatusCode() + ')');
+            }
+            String digest = body == null ? "" : body.path("Descriptor").path("digest").asText("");
+            if (!notBlank(digest)) throw new IllegalStateException("远端仓库未返回镜像摘要");
+            return digest;
+        } catch (IllegalStateException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException("查询远端镜像摘要失败: " + safeMessage(exception), exception);
+        }
+    }
+
+    private Set<String> inspectLocalDigests(DockerClient docker, String image) {
+        try {
+            InspectImageResponse response = docker.inspectImageCmd(image).exec();
+            if (response.getRepoDigests() == null) return Set.of();
+            return response.getRepoDigests().stream()
+                    .filter(this::notBlank)
+                    .map(value -> value.substring(value.lastIndexOf('@') + 1))
+                    .filter(value -> value.startsWith("sha256:"))
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        } catch (Exception exception) {
+            return Set.of();
+        }
     }
 
     private InspectContainerResponse inspectContainer(DockerClient docker, String containerId) {
