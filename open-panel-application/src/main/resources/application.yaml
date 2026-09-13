@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: open-panel
+  jmx:
+    enabled: false
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 205MB
+  web:
+    resources:
+      chain:
+        enabled: true
+        compressed: true
+
+server:
+  port: ${SERVER_PORT:57788}
+  address: ${SERVER_ADDRESS:0.0.0.0}
+  shutdown: graceful
+  compression:
+    enabled: true
+    min-response-size: 1KB
+
+logging:
+  file:
+    name: ${OPEN_PANEL_CONFIG_DIR:./config}/logs/open-panel.log
+  logback:
+    rollingpolicy:
+      clean-history-on-start: true
+      max-file-size: 20MB
+      max-history: ${OPEN_PANEL_LOG_MAX_HISTORY:7}
+      total-size-cap: 512MB
+
+open-panel:
+  config-dir: ${OPEN_PANEL_CONFIG_DIR:./config}

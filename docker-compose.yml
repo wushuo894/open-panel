@@ -1,0 +1,17 @@
+services:
+  open-panel:
+    image: ghcr.io/wushuo894/open-panel:latest
+    container_name: open-panel
+    restart: always
+    network_mode: host
+    environment:
+      SERVER_PORT: 57788
+      TZ: Asia/Shanghai
+      PUID: 0
+      PGID: 0
+      UMASK: "022"
+    volumes:
+      - /volume1/docker/open-panel/config:/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # - /volume1:/volume1
+      # - /volume2:/volume2

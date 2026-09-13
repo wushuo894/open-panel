@@ -1,0 +1,19 @@
+:root {
+  color-scheme: light dark;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html { overflow-y: scroll; scrollbar-gutter: stable; scroll-behavior: smooth; }
+body { margin: 0; min-width: 320px; }
+button, input, textarea { letter-spacing: 0 !important; }
+.v-btn { letter-spacing: 0 !important; text-transform: none !important; }
+.page-shell { min-height: 100svh; background: rgb(var(--v-theme-background)); }
+.content-width { width: min(1180px, calc(100% - 40px)); margin-inline: auto; }
+.section-title { font-size: 1.05rem; font-weight: 700; letter-spacing: 0; }
+.muted { color: rgba(var(--v-theme-on-surface), .62); }
+
+@media (max-width: 600px) {
+  .content-width { width: min(100% - 24px, 1180px); }
+}
