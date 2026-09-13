@@ -23,6 +23,7 @@ import java.util.Map;
 @Service
 public class SoftwareServiceStatusService {
     private final HttpClient httpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(3))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
@@ -35,6 +36,7 @@ public class SoftwareServiceStatusService {
                 case "emby" -> emby(service);
                 case "ani-rss" -> aniRss(service);
                 case "qbit" -> qBittorrent(service);
+                case "openlist" -> openList(service);
                 default -> generic(service, type);
             };
         } catch (MissingApiKeyException exception) {
@@ -177,6 +179,42 @@ public class SoftwareServiceStatusService {
         return result;
     }
 
+    private Map<String, Object> openList(PanelConfig.ServiceCard service) throws Exception {
+        String base = requireBase(service);
+        Map<String, String> headers = apiKeyHeader(service, "Authorization", "openlist");
+        Response storageResponse = get(endpoint(base, "/api/admin/storage/list"), headers);
+        if (!success(storageResponse)) return specialFailure(service, "openlist", storageResponse);
+
+        JsonObject envelope = jsonObject(storageResponse.body());
+        int apiCode = integer(envelope, "code", 500);
+        if (apiCode == 401 || apiCode == 403) return authFailure("openlist", storageResponse.elapsedMs());
+        if (apiCode < 200 || apiCode >= 300) return fallback(service, "openlist", "OpenList API 不可用");
+
+        JsonObject data = object(envelope, "data");
+        JsonArray storages = array(data, "content");
+        int storageCount = integer(data, "total", storages.size());
+        long totalSpace = 0;
+        int storageDetailsCount = 0;
+        for (JsonElement element : storages) {
+            if (!element.isJsonObject()) continue;
+            JsonObject details = object(element.getAsJsonObject(), "mount_details");
+            if (details.isEmpty()) continue;
+            long capacity = Math.max(0, number(details, "total_space", 0).longValue());
+            totalSpace = capacity > Long.MAX_VALUE - totalSpace ? Long.MAX_VALUE : totalSpace + capacity;
+            storageDetailsCount++;
+        }
+
+        Map<String, Object> result = online("openlist", storageResponse, "服务正常");
+        result.put("storageCount", storageCount);
+        result.put("totalSpace", totalSpace);
+        result.put("storageDetailsCount", storageDetailsCount);
+        result.put("summary", summary(
+                storageDetailsCount > 0 ? formatBytes(totalSpace) : "容量未知",
+                "存储 " + storageCount
+        ));
+        return result;
+    }
+
     private Map<String, String> apiKeyHeader(PanelConfig.ServiceCard service, String header, String type) {
         if (blank(service.getToken())) throw new MissingApiKeyException(type);
         Map<String, String> headers = new LinkedHashMap<>();
@@ -253,6 +291,7 @@ public class SoftwareServiceStatusService {
 
     private Response request(String method, String url, Map<String, String> headers) throws Exception {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
+                .version(HttpClient.Version.HTTP_1_1)
                 .timeout(Duration.ofSeconds(4))
                 .header("User-Agent", "Open-Panel/1.0")
                 .header("Accept", "application/json, text/plain, */*");
@@ -321,6 +360,19 @@ public class SoftwareServiceStatusService {
         List<String> values = new ArrayList<>();
         for (String part : parts) if (!blank(part)) values.add(part.trim());
         return values.isEmpty() ? "服务在线" : String.join(" · ", values);
+    }
+
+    private String formatBytes(long bytes) {
+        String[] units = {"B", "KB", "MB", "GB", "TB", "PB"};
+        double size = Math.max(0, bytes);
+        int unit = 0;
+        while (size >= 1024 && unit < units.length - 1) {
+            size /= 1024;
+            unit++;
+        }
+        return unit == 0
+                ? Math.round(size) + " " + units[unit]
+                : String.format(Locale.ROOT, "%.1f %s", size, units[unit]);
     }
 
     private void put(Map<String, Object> target, String key, String value) {

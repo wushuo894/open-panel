@@ -27,22 +27,32 @@ const cardTypes = [
   { title: '软件服务', value: 'service' },
   { title: 'Docker 容器', value: 'docker' }
 ]
+const systemMetrics = [
+  { title: '综合信息', value: 'overview', cardTitle: '系统信息' },
+  { title: 'CPU', value: 'cpu', cardTitle: 'CPU' },
+  { title: '内存', value: 'memory', cardTitle: '内存' },
+  { title: '存储', value: 'storage', cardTitle: '存储' },
+  { title: '网络', value: 'network', cardTitle: '网络' }
+]
 const serviceTypes = [
   { title: 'Emby', value: 'emby' },
   { title: 'ani-rss', value: 'ani-rss' },
   { title: 'qBittorrent', value: 'qbit' },
+  { title: 'OpenList', value: 'openlist' },
   { title: '通用 Web 服务', value: 'generic' }
 ]
 const serviceDefaults = {
   emby: ['Emby', 'mdi-play-circle-outline', '媒体服务器'],
   'ani-rss': ['ani-rss', 'mdi-rss', '自动追番与下载'],
   qbit: ['qBittorrent', 'mdi-download-network-outline', '下载服务'],
+  openlist: ['OpenList', 'mdi-folder-network-outline', '聚合存储与文件管理'],
   generic: ['Web 服务', 'mdi-application-outline', '自托管 Web 服务']
 }
 const serviceAuthHints = {
   emby: '填写 Emby API Key 后可显示版本、活跃播放和转码数量。',
   'ani-rss': '填写 ani-rss 设置页生成的 API Key。',
   qbit: '填写 qBittorrent 生成的 qbt_ 开头 API Key。',
+  openlist: '填写 OpenList API Token，可显示存储总容量和存储数量。',
   generic: '通用服务使用状态检测 URL 探测 HTTP 状态。'
 }
 const currentServiceAuthHint = computed(() => serviceAuthHints[draft.value?.service?.serviceType] || serviceAuthHints.generic)
@@ -118,7 +128,8 @@ function submit() {
 function applyCardTypeDefaults(type) {
   draft.value.type = type
   if (type === 'system') {
-    Object.assign(draft.value, { title: '系统状态', icon: 'mdi-server-outline', remark: 'CPU、内存、存储与网络' })
+    Object.assign(draft.value, { icon: 'mdi-server-outline', remark: 'CPU、内存、存储与网络' })
+    changeSystemMetric(draft.value.system.metric || 'overview')
   } else if (type === 'docker') {
     Object.assign(draft.value, { title: 'Docker 容器', icon: 'mdi-docker', remark: '容器运行状态' })
     loadDockerContainers()
@@ -147,8 +158,15 @@ function applyServiceDefaults(type) {
   Object.assign(draft.value, { title, icon, remark })
 }
 
-async function autoFillCustomCard() {
-  const url = draft.value.custom.internalUrl?.trim() || draft.value.custom.externalUrl?.trim()
+function changeSystemMetric(metric) {
+  draft.value.system.metric = metric
+  const selectedMetric = systemMetrics.find(item => item.value === metric)
+  if (selectedMetric) draft.value.title = selectedMetric.cardTitle
+}
+
+async function autoFillCardFromLink() {
+  const source = draft.value[draft.value.type]
+  const url = source?.internalUrl?.trim() || source?.externalUrl?.trim()
   if (!url) {
     error.value = '请先填写内网或公网 URL'
     return
@@ -182,6 +200,14 @@ async function loadDockerContainers() {
   }
 }
 
+function changeDockerContainer(value) {
+  const selectedValue = typeof value === 'object' ? value?.id : value
+  const container = dockerContainers.value.find(item =>
+    item.id === selectedValue || item.containerId === selectedValue || item.name === selectedValue
+  )
+  if (container?.name) draft.value.title = container.name
+}
+
 async function uploadIcon(value) {
   const file = Array.isArray(value) ? value[0] : value
   if (!file) return
@@ -208,23 +234,34 @@ async function uploadIcon(value) {
       <v-card-title>卡片设置</v-card-title>
       <v-card-text class="dialog-form">
         <v-alert v-if="error" type="error" variant="tonal" density="compact" closable @click:close="error = ''">{{ error }}</v-alert>
-        <div class="form-grid">
-          <v-text-field v-model="draft.title" label="标题" />
+        <div class="card-option-fields">
           <v-select v-model="draft.groupId" label="所属分组" :items="groups" item-title="title" item-value="id" />
           <v-select :model-value="draft.type" label="卡片类型" :items="cardTypes" @update:model-value="changeCardType" />
           <v-select v-model="draft.openTarget" label="打开方式" :items="[{title:'新窗口',value:'new'},{title:'当前窗口',value:'self'}]" />
         </div>
-        <v-text-field v-model="draft.remark" label="备注" />
+        <div class="form-grid card-content-fields">
+          <v-text-field v-model="draft.title" label="标题" />
+          <v-text-field v-model="draft.remark" label="备注" />
+        </div>
 
         <section class="icon-section">
           <div class="icon-section-head">
-            <strong>图标</strong>
-            <v-btn-toggle :model-value="iconSource" mandatory divided density="comfortable" class="icon-source-toggle" @update:model-value="changeIconSource">
-              <v-btn value="mdi" prepend-icon="mdi-shape-outline">MDI 图标</v-btn>
-              <v-btn value="url" prepend-icon="mdi-link-variant">图片 URL</v-btn>
-              <v-btn value="upload" prepend-icon="mdi-upload-outline">上传图片</v-btn>
-            </v-btn-toggle>
+            <strong>图标来源</strong>
+            <span>选择一种图标设置方式</span>
           </div>
+          <v-tabs
+            :model-value="iconSource"
+            color="primary"
+            density="compact"
+            height="42"
+            grow
+            class="icon-source-tabs"
+            @update:model-value="changeIconSource"
+          >
+            <v-tab value="mdi" prepend-icon="mdi-shape-outline">图标库</v-tab>
+            <v-tab value="url" prepend-icon="mdi-link-variant">图片链接</v-tab>
+            <v-tab value="upload" prepend-icon="mdi-upload-outline">本地上传</v-tab>
+          </v-tabs>
           <div class="icon-editor-row">
             <span class="icon-preview">
               <v-icon v-if="iconSource === 'mdi' || !draft.iconUrl" :icon="iconSource === 'mdi' ? (draft.icon || 'mdi-web') : 'mdi-image-outline'" size="32" />
@@ -253,14 +290,14 @@ async function uploadIcon(value) {
         <v-switch v-model="draft.enabled" label="在首页显示" color="primary" />
 
         <template v-if="draft.type === 'custom'">
-          <div class="custom-link-fields">
+          <div class="link-fields-with-action">
             <v-text-field v-model="draft.custom.internalUrl" label="内网 URL" />
             <v-text-field v-model="draft.custom.externalUrl" label="公网 URL" />
-            <v-btn prepend-icon="mdi-auto-fix" variant="outlined" :loading="loadingMetadata" @click="autoFillCustomCard">从链接自动补全</v-btn>
+            <v-btn prepend-icon="mdi-auto-fix" variant="outlined" :loading="loadingMetadata" @click="autoFillCardFromLink">从链接自动补全</v-btn>
           </div>
         </template>
         <template v-else-if="draft.type === 'system'">
-          <v-select v-model="draft.system.metric" label="系统信息" :items="[{title:'综合信息',value:'overview'},{title:'CPU',value:'cpu'},{title:'内存',value:'memory'},{title:'存储',value:'storage'},{title:'网络',value:'network'}]" />
+          <v-select v-model="draft.system.metric" label="系统信息" :items="systemMetrics" @update:model-value="changeSystemMetric" />
           <v-text-field
             v-if="draft.system.metric === 'storage'"
             v-model="draft.system.storagePath"
@@ -273,9 +310,10 @@ async function uploadIcon(value) {
         <template v-else-if="draft.type === 'service'">
           <v-select v-model="draft.service.serviceType" label="服务类型" :items="serviceTypes" @update:model-value="applyServiceDefaults" />
           <p class="field-hint">{{ currentServiceAuthHint }}</p>
-          <div class="form-grid">
+          <div class="link-fields-with-action">
             <v-text-field v-model="draft.service.internalUrl" label="内网 URL" />
             <v-text-field v-model="draft.service.externalUrl" label="公网 URL" />
+            <v-btn prepend-icon="mdi-auto-fix" variant="outlined" :loading="loadingMetadata" @click="autoFillCardFromLink">从链接自动补全</v-btn>
           </div>
           <v-text-field v-if="draft.service.serviceType === 'generic'" v-model="draft.service.statusUrl" label="状态检测 URL" />
           <v-text-field
@@ -298,10 +336,12 @@ async function uploadIcon(value) {
             :return-object="false"
             hint="可从当前 Docker 容器中选择，也可手动填写"
             persistent-hint
+            @update:model-value="changeDockerContainer"
           />
-          <div class="form-grid">
+          <div class="link-fields-with-action">
             <v-text-field v-model="draft.docker.internalUrl" label="内网 URL" />
             <v-text-field v-model="draft.docker.externalUrl" label="公网 URL" />
+            <v-btn prepend-icon="mdi-auto-fix" variant="outlined" :loading="loadingMetadata" @click="autoFillCardFromLink">从链接自动补全</v-btn>
           </div>
         </template>
       </v-card-text>
@@ -317,23 +357,27 @@ async function uploadIcon(value) {
 <style scoped>
 .dialog-form { display: grid; gap: 4px; padding-top: 20px !important; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 4px 16px; }
+.card-option-fields { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 4px 16px; }
 .icon-section { display: grid; gap: 14px; padding: 16px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgba(var(--v-theme-on-surface),.025); }
-.icon-section-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.icon-section-head { display: flex; align-items: baseline; gap: 10px; }
 .icon-section-head strong { font-size: .9rem; letter-spacing: 0; }
-.icon-source-toggle { flex: 0 1 auto; max-width: 100%; }
+.icon-section-head span { color: rgba(var(--v-theme-on-surface),.56); font-size: .75rem; }
+.icon-source-tabs { border-bottom: 1px solid rgba(var(--v-theme-on-surface),.1); }
+.icon-source-tabs :deep(.v-tab) { min-width: 0; padding-inline: 12px; color: rgba(var(--v-theme-on-surface),.68); font-size: .82rem; letter-spacing: 0; text-transform: none; }
+.icon-source-tabs :deep(.v-tab--selected) { color: rgb(var(--v-theme-primary)); }
+.icon-source-tabs :deep(.v-tab__slider) { height: 2px; }
 .icon-editor-row { display: grid; grid-template-columns: 56px minmax(0,1fr); align-items: start; gap: 14px; }
 .icon-preview { display: grid; width: 56px; height: 56px; place-items: center; overflow: hidden; border: 1px solid rgba(var(--v-theme-on-surface),.12); border-radius: 8px; background: rgb(var(--v-theme-surface)); color: rgb(var(--v-theme-on-surface)); }
 .icon-preview img { width: 42px; height: 42px; object-fit: contain; }
 .field-hint { margin: -8px 0 12px; color: rgba(var(--v-theme-on-surface), .62); font-size: .78rem; line-height: 1.5; }
-.custom-link-fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)) auto; align-items: start; gap: 16px; }
+.link-fields-with-action { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)) auto; align-items: start; gap: 16px; }
 @media (max-width: 820px) {
-  .form-grid, .custom-link-fields { grid-template-columns: 1fr; }
-  .icon-section-head { align-items: stretch; flex-direction: column; }
-  .icon-source-toggle { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); width: 100%; }
-  .icon-source-toggle :deep(.v-btn) { min-width: 0; padding-inline: 8px; }
+  .form-grid, .card-option-fields, .link-fields-with-action { grid-template-columns: 1fr; }
 }
 @media (max-width: 520px) {
-  .icon-source-toggle :deep(.v-btn__prepend) { display: none; }
+  .icon-section { padding-inline: 12px; }
+  .icon-source-tabs :deep(.v-tab) { padding-inline: 4px; font-size: .78rem; }
+  .icon-source-tabs :deep(.v-btn__prepend) { margin-inline-end: 5px; }
   .icon-editor-row { grid-template-columns: 44px minmax(0,1fr); gap: 10px; }
   .icon-preview { width: 44px; height: 44px; }
   .icon-preview img { width: 34px; height: 34px; }

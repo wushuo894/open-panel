@@ -27,7 +27,9 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           name: ${{ env.version }}
+          body_path: UPDATE.md
           tag_name: ${{ env.version }}
+          append_body: false
           token: ${{ secrets.GITHUB_TOKEN }}
           files: open-panel-application/target/open-panel.jar
       - uses: docker/login-action@v3

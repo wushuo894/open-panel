@@ -21,6 +21,9 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
@@ -48,6 +51,12 @@ public class WebScanService {
     private final Set<String> cancelled = ConcurrentHashMap.newKeySet();
     private final ExecutorService coordinators = Executors.newVirtualThreadPerTaskExecutor();
     private final SSLContext insecureSslContext = createScannerSslContext();
+    private final HttpClient metadataHttpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .sslContext(insecureSslContext)
+            .connectTimeout(java.time.Duration.ofSeconds(3))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
 
     public WebScanModels.ScanJob start(WebScanModels.ScanRequest request) {
         if (jobs.values().stream().anyMatch(job -> "queued".equals(job.getStatus()) || "running".equals(job.getStatus()))) {
@@ -199,24 +208,29 @@ public class WebScanService {
 
     private WebScanModels.Candidate fetchMetadata(URI uri) {
         try {
-            org.jsoup.Connection.Response response = Jsoup.connect(uri.toString())
-                    .userAgent("Open-Panel/1.0")
-                    .timeout(5000)
-                    .maxBodySize(MAX_RESPONSE_BYTES)
-                    .followRedirects(true)
-                    .ignoreHttpErrors(true)
-                    .ignoreContentType(true)
-                    .sslContext(insecureSslContext)
-                    .execute();
-            String contentType = response.contentType() == null ? "" : response.contentType().toLowerCase(Locale.ROOT);
+            HttpRequest request = HttpRequest.newBuilder(uri)
+                    .version(HttpClient.Version.HTTP_1_1)
+                    .timeout(java.time.Duration.ofSeconds(5))
+                    .header("User-Agent", "Open-Panel/1.0")
+                    .header("Accept", "text/html,application/xhtml+xml,*/*")
+                    .GET()
+                    .build();
+            HttpResponse<InputStream> response = metadataHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            String contentType = response.headers().firstValue("Content-Type").orElse("").toLowerCase(Locale.ROOT);
             if (response.statusCode() != 200) {
+                response.body().close();
                 throw new IllegalArgumentException("链接返回 HTTP " + response.statusCode());
             }
             if (!(contentType.startsWith("text/html") || contentType.startsWith("application/xhtml+xml"))) {
+                response.body().close();
                 throw new IllegalArgumentException("链接返回的内容不是 HTML");
             }
-            Document document = response.parse();
-            String finalUrl = response.url().toString();
+            byte[] body;
+            try (InputStream input = response.body()) {
+                body = input.readNBytes(MAX_RESPONSE_BYTES);
+            }
+            String finalUrl = response.uri().toString();
+            Document document = Jsoup.parse(new ByteArrayInputStream(body), null, finalUrl);
             String title = extractTitle(document, uri.getHost());
             Element descriptionElement = document.selectFirst(
                     "meta[name=description], meta[property=og:description], meta[name=twitter:description]");
