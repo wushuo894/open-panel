@@ -31,7 +31,7 @@ public class UpdateService {
     private final boolean container;
     private final JsonConfigRepository repository;
 
-    public UpdateService(@Value("${info.build.version:1.0.1}") String currentVersion,
+    public UpdateService(@Value("${info.build.version:1.0.2}") String currentVersion,
                          @Value("${open-panel.container:false}") boolean container,
                          JsonConfigRepository repository) {
         this.currentVersion = currentVersion;
