@@ -9,7 +9,7 @@ services:
       TZ: Asia/Shanghai
       PUID: 0
       PGID: 0
-      UMASK: 022
+      UMASK: "022"
     volumes:
       - /volume1/docker/open-panel/config:/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
