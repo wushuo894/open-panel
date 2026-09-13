@@ -106,6 +106,9 @@ public class JsonConfigRepository {
         PanelConfig defaults = DefaultConfigFactory.create();
         if (value.getSite() == null) value.setSite(defaults.getSite());
         if (value.getPage() == null) value.setPage(defaults.getPage());
+        if (!"sections".equals(value.getPage().getGroupLayout()) && !"tabs".equals(value.getPage().getGroupLayout())) {
+            value.getPage().setGroupLayout("sections");
+        }
         if (value.getPage().getCover() == null) value.getPage().setCover(defaults.getPage().getCover());
         if (value.getPage().getCover().getGroupIds() == null) {
             value.getPage().getCover().setGroupIds(new java.util.ArrayList<>());
@@ -152,6 +155,15 @@ public class JsonConfigRepository {
             }
             value.setSchemaVersion(7);
         }
+        if (value.getSchemaVersion() < 8) {
+            value.getPage().setTabsShowAll(true);
+            value.setSchemaVersion(8);
+        }
+        if (value.getSite().getThemeColor() == null
+                || !value.getSite().getThemeColor().matches("(?i)^#[0-9a-f]{6}$")) {
+            value.getSite().setThemeColor(defaults.getSite().getThemeColor());
+        }
+        if (value.getSchemaVersion() < 9) value.setSchemaVersion(9);
     }
 
     private void normalizeServiceTypes(PanelConfig value) {

@@ -1,12 +1,15 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useTheme } from 'vuetify'
 import { api, getToken, setToken } from '../lib/api'
 import { appUrl } from '../lib/paths'
+import { applySiteTheme, extractThemeColor, normalizeThemeColor } from '../lib/theme'
 import { appState } from '../stores/app'
 import MdiIconPicker from '../components/MdiIconPicker.vue'
 
 const router = useRouter()
+const theme = useTheme()
 const tab = ref('appearance')
 const config = ref(null)
 const loading = ref(true)
@@ -20,6 +23,7 @@ const updateInfo = ref(null)
 const updateLoading = ref(false)
 const updateAutoChecked = ref(false)
 const uploadingBackground = ref(false)
+const extractingThemeColor = ref(false)
 const usernameForm = ref({ newUsername: '', currentPassword: '' })
 const passwordForm = ref({ currentPassword: '', newPassword: '', confirmPassword: '' })
 const visibleSecrets = ref({ usernamePassword: false, currentPassword: false, newPassword: false, confirmPassword: false, githubToken: false })
@@ -41,6 +45,11 @@ const cleanupDialog = ref(false)
 const cleanupLoading = ref(false)
 const dockerClock = ref(Date.now())
 const dockerOverviewLoadedAt = ref(Date.now())
+const predefinedThemeColors = [
+  '#d8f257', '#409eff', '#109d58', '#bf3545', '#cb7574', '#9aaec7', '#2ec5b6', '#1c1c1c', '#f7b1a9',
+  '#b18874', '#e9ba86', '#f68f6c', '#f0458b', '#c35653', '#40494e', '#6f0000', '#8d3647',
+  '#e6c5d0', '#2377b3', '#49312d', '#7c9ab6', '#a5b18d', '#e8662a', '#ab5d50'
+]
 let scanTimer
 let dockerTimer
 let dockerClockTimer
@@ -58,6 +67,7 @@ const wallpaperText = computed({
   get: () => config.value?.page.cover.wallpapers.join('\n') || '',
   set: value => { config.value.page.cover.wallpapers = value.split('\n').map(item => item.trim()).filter(Boolean) }
 })
+const previewWallpaper = computed(() => appUrl(config.value?.page?.cover?.wallpapers?.[0] || config.value?.site?.background || ''))
 const footerText = computed({
   get: () => config.value?.page.footer.lines.join('\n') || '',
   set: value => { config.value.page.footer.lines = value.split('\n').slice(0, 4) }
@@ -90,6 +100,9 @@ watch(tab, value => {
     updateAutoChecked.value = true
     checkUpdate()
   }
+})
+watch(() => [config.value?.site?.theme, config.value?.site?.themeColor], () => {
+  if (config.value?.site) applySiteTheme(theme, config.value.site)
 })
 
 async function load() {
@@ -259,6 +272,27 @@ async function uploadBackground(value) {
   finally { uploadingBackground.value = false }
 }
 
+function normalizeThemeColorField() {
+  config.value.site.themeColor = normalizeThemeColor(config.value.site.themeColor)
+}
+
+async function pickThemeColorFromWallpaper() {
+  if (!previewWallpaper.value) {
+    error.value = '请先设置壁纸'
+    return
+  }
+  extractingThemeColor.value = true
+  error.value = ''
+  try {
+    config.value.site.themeColor = await extractThemeColor(previewWallpaper.value)
+    message.value = `已从壁纸选取主题色 ${config.value.site.themeColor}，点击保存后生效`
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    extractingThemeColor.value = false
+  }
+}
+
 function addEngine() {
   config.value.searchEngines.push({ id: uuid(), name: '新搜索引擎', icon: 'mdi-magnify', urlTemplate: 'https://example.com/search?q={query}', enabled: true, sort: config.value.searchEngines.length })
 }
@@ -422,6 +456,26 @@ function dockerStateLabel(state) {
   return ({ running: '运行中', exited: '已停止', created: '已创建', paused: '已暂停', restarting: '重启中', dead: '异常退出' })[state] || state || '未知'
 }
 
+function containerIsActive(container) {
+  return ['running', 'paused', 'restarting'].includes(container.state)
+}
+
+function containerIsUpdating(container) {
+  if (!dockerJobRunning.value || dockerJob.value?.type !== 'update' || !dockerJob.value.containerId) return false
+  const target = dockerJob.value.containerId
+  return container.id === target || container.id.startsWith(target) || target.startsWith(container.id)
+}
+
+function dockerPhaseLabel(phase) {
+  return ({
+    queued: '等待开始更新',
+    loading: '正在读取容器配置',
+    pulling: '正在拉取新镜像',
+    recreating: '正在重建容器',
+    cancelling: '正在中断更新'
+  })[phase] || '正在更新容器'
+}
+
 function formatDuration(seconds) {
   const value = Math.max(0, Number(seconds) || 0)
   const days = Math.floor(value / 86400)
@@ -552,7 +606,32 @@ function logout() {
               <v-text-field v-model="config.site.icon" label="网站图标 URL" />
               <v-select v-model="config.site.theme" label="主题" :items="[{title:'跟随系统',value:'system'},{title:'浅色',value:'light'},{title:'深色',value:'dark'}]" />
               <v-select v-model="config.page.mode" label="页面模式" :items="[{title:'大封面模式',value:'cover'},{title:'列表模式',value:'list'}]" />
-              <v-switch v-model="config.site.cornerControlsHoverOnly" label="右上角按钮仅悬停时显示" color="primary" hide-details />
+              <v-select v-model="config.page.groupLayout" label="卡片组布局" :items="[{title:'纵向分组',value:'sections'},{title:'Tabs 切换',value:'tabs'}]" />
+              <div class="theme-color-control">
+                <input v-model="config.site.themeColor" class="theme-color-swatch" type="color" aria-label="选择主题色" title="选择主题色" />
+                <v-text-field v-model="config.site.themeColor" label="主题色" hide-details @blur="normalizeThemeColorField" />
+                <v-btn variant="outlined" prepend-icon="mdi-eyedropper-variant" :loading="extractingThemeColor" @click="pickThemeColorFromWallpaper">从壁纸选取</v-btn>
+              </div>
+              <div class="theme-color-presets" aria-label="推荐主题色">
+                <span>推荐颜色</span>
+                <button
+                  v-for="color in predefinedThemeColors"
+                  :key="color"
+                  type="button"
+                  class="theme-color-preset"
+                  :class="{ selected: normalizeThemeColor(config.site.themeColor) === color }"
+                  :style="{ '--preset-color': color }"
+                  :aria-label="`使用主题色 ${color}`"
+                  :title="color"
+                  @click="config.site.themeColor = color"
+                >
+                  <v-icon v-if="normalizeThemeColor(config.site.themeColor) === color" icon="mdi-check" size="15" />
+                </button>
+              </div>
+              <div class="site-page-switches">
+                <v-switch v-if="config.page.groupLayout === 'tabs'" v-model="config.page.tabsShowAll" label="显示“全部”标签" color="primary" hide-details />
+                <v-switch v-model="config.site.cornerControlsHoverOnly" label="右上角按钮仅悬停时显示" color="primary" hide-details />
+              </div>
             </div>
           </section>
 
@@ -576,7 +655,7 @@ function logout() {
               <span
                 class="background-preview"
                 :style="{
-                  backgroundImage: `linear-gradient(rgba(8, 12, 11, ${config.site.backgroundOverlay}), rgba(8, 12, 11, ${config.site.backgroundOverlay})), url(${appUrl(config.page.cover.wallpapers[0] || config.site.background)})`
+                  backgroundImage: `linear-gradient(rgba(8, 12, 11, ${config.site.backgroundOverlay}), rgba(8, 12, 11, ${config.site.backgroundOverlay})), url(${previewWallpaper})`
                 }"
               />
               <v-file-input
@@ -706,72 +785,92 @@ function logout() {
             </div>
 
             <div v-if="dockerOverview.containers.length" class="docker-list">
-              <article v-for="container in dockerOverview.containers" :key="container.id" class="docker-row">
-                <span class="docker-icon"><v-icon icon="mdi-docker" size="24" /></span>
-                <div class="docker-copy">
-                  <strong>{{ container.name }}</strong>
-                  <small>当前镜像 {{ container.image || '未知' }}</small>
-                  <small v-if="container.state === 'running'">已运行 {{ formatDuration(containerUptime(container)) }}</small>
-                  <small v-else>{{ container.status }}</small>
-                </div>
-                <div class="docker-state">
-                  <v-chip size="small" variant="tonal" :color="container.state === 'running' ? 'success' : undefined">
-                    {{ dockerStateLabel(container.state) }}
-                  </v-chip>
-                  <v-chip v-if="container.self" size="small" variant="outlined">当前实例</v-chip>
-                  <v-chip v-else-if="container.checkError" size="small" color="error" variant="tonal">检测失败</v-chip>
-                  <v-chip v-else-if="container.updateAvailable" size="small" color="warning" variant="tonal">发现更新</v-chip>
-                  <v-chip v-else-if="container.updateChecked" size="small" color="success" variant="tonal">已是最新</v-chip>
-                  <v-chip v-else-if="!container.updatable" size="small" variant="outlined">不可更新</v-chip>
-                  <v-chip v-else size="small" variant="outlined">等待检测</v-chip>
-                </div>
-                <div class="docker-action">
-                  <small v-if="container.checkError" class="docker-error">{{ container.checkError }}</small>
-                  <small v-else-if="container.reason">{{ container.reason }}</small>
-                  <div class="docker-controls">
-                    <v-btn icon="mdi-file-code-outline" variant="text" aria-label="查看 Docker Compose" @click="showDockerCompose(container)">
+              <article
+                v-for="container in dockerOverview.containers"
+                :key="container.id"
+                class="docker-row"
+                :class="{
+                  'docker-row--running': container.state === 'running',
+                  'docker-row--updating': containerIsUpdating(container)
+                }"
+                :style="containerIsUpdating(container) ? { '--docker-progress': `${dockerJob.progress}%` } : undefined"
+              >
+                <div class="docker-main">
+                  <span class="docker-icon"><v-icon icon="mdi-cube-outline" size="34" /></span>
+                  <span class="docker-health" aria-hidden="true" />
+                  <div class="docker-copy">
+                    <strong>{{ container.name }}</strong>
+                    <small class="docker-image" :title="container.image">{{ container.image || '未知镜像' }}</small>
+                    <small v-if="containerIsUpdating(container)" class="docker-live-state">
+                      <v-icon icon="mdi-sync" size="18" />{{ dockerPhaseLabel(dockerJob.phase) }}
+                    </small>
+                    <small v-else-if="container.state === 'running'">运行：{{ formatDuration(containerUptime(container)) }}</small>
+                    <small v-else>{{ dockerStateLabel(container.state) }} · {{ container.status }}</small>
+                  </div>
+                  <div class="docker-card-tools">
+                    <v-chip v-if="container.self" size="x-small" variant="tonal">当前实例</v-chip>
+                    <v-chip v-else-if="container.checkError" size="x-small" color="error" variant="tonal">检测失败</v-chip>
+                    <v-chip v-else-if="!container.updatable" size="x-small" variant="tonal">不可更新</v-chip>
+                    <v-chip v-else-if="container.updateAvailable" size="x-small" color="warning" variant="tonal">发现更新</v-chip>
+                    <v-btn icon="mdi-file-code-outline" size="small" variant="text" aria-label="查看 Docker Compose" @click="showDockerCompose(container)">
                       <v-icon icon="mdi-file-code-outline" />
                       <v-tooltip activator="parent">查看 docker-compose.yaml</v-tooltip>
                     </v-btn>
-                    <template v-if="!container.self">
-                      <v-btn
-                        v-if="!['running', 'paused', 'restarting'].includes(container.state)"
-                        icon="mdi-play"
-                        variant="text"
-                        color="success"
-                        aria-label="启动容器"
-                        :loading="dockerAction === `${container.id}:start`"
-                        :disabled="dockerJobRunning || !!dockerAction"
-                        @click="runDockerAction(container, 'start')"
-                      ><v-icon icon="mdi-play" /><v-tooltip activator="parent">启动</v-tooltip></v-btn>
-                      <template v-else>
-                        <v-btn
-                          icon="mdi-restart"
-                          variant="text"
-                          aria-label="重启容器"
-                          :loading="dockerAction === `${container.id}:restart`"
-                          :disabled="dockerJobRunning || !!dockerAction"
-                          @click="runDockerAction(container, 'restart')"
-                        ><v-icon icon="mdi-restart" /><v-tooltip activator="parent">重启</v-tooltip></v-btn>
-                        <v-btn
-                          icon="mdi-stop"
-                          variant="text"
-                          color="error"
-                          aria-label="停止容器"
-                          :loading="dockerAction === `${container.id}:stop`"
-                          :disabled="dockerJobRunning || !!dockerAction"
-                          @click="runDockerAction(container, 'stop')"
-                        ><v-icon icon="mdi-stop" /><v-tooltip activator="parent">停止</v-tooltip></v-btn>
-                      </template>
-                    </template>
-                    <v-btn
-                      v-if="container.updatable"
-                      color="secondary"
-                      prepend-icon="mdi-update"
-                      :disabled="dockerJobRunning || !!dockerAction"
-                      @click="startDockerUpdate(container)"
-                    >一键更新</v-btn>
                   </div>
+                </div>
+
+                <small v-if="container.checkError || container.reason" class="docker-note" :class="{ 'docker-error': container.checkError }">
+                  {{ container.checkError || container.reason }}
+                </small>
+
+                <div class="docker-divider" />
+
+                <v-btn
+                  v-if="containerIsUpdating(container)"
+                  class="docker-inline-progress"
+                  variant="outlined"
+                  :color="dockerJob.cancellable && dockerJob.status !== 'cancelling' ? 'error' : 'primary'"
+                  :prepend-icon="dockerJob.cancellable && dockerJob.status !== 'cancelling' ? 'mdi-stop-circle-outline' : 'mdi-sync'"
+                  :disabled="!dockerJob.cancellable || dockerJob.status === 'cancelling'"
+                  @click="cancelDockerJob"
+                >{{ dockerJob.status === 'cancelling' ? '正在停止' : dockerJob.cancellable ? '停止更新' : '正在安全替换' }} {{ dockerJob.progress }}%</v-btn>
+                <div v-else class="docker-controls">
+                  <template v-if="!container.self">
+                    <v-btn
+                      v-if="containerIsActive(container)"
+                      variant="outlined"
+                      color="error"
+                      prepend-icon="mdi-stop"
+                      :loading="dockerAction === `${container.id}:stop`"
+                      :disabled="dockerJobRunning || !!dockerAction"
+                      @click="runDockerAction(container, 'stop')"
+                    >停止</v-btn>
+                    <v-btn
+                      v-else
+                      variant="outlined"
+                      color="success"
+                      prepend-icon="mdi-play"
+                      :loading="dockerAction === `${container.id}:start`"
+                      :disabled="dockerJobRunning || !!dockerAction"
+                      @click="runDockerAction(container, 'start')"
+                    >启动</v-btn>
+                    <v-btn
+                      variant="outlined"
+                      color="primary"
+                      prepend-icon="mdi-restart"
+                      :loading="dockerAction === `${container.id}:restart`"
+                      :disabled="!containerIsActive(container) || dockerJobRunning || !!dockerAction"
+                      @click="runDockerAction(container, 'restart')"
+                    >重启</v-btn>
+                  </template>
+                  <v-btn
+                    v-if="container.updatable"
+                    variant="outlined"
+                    color="secondary"
+                    prepend-icon="mdi-upload-outline"
+                    :disabled="dockerJobRunning || !!dockerAction"
+                    @click="startDockerUpdate(container)"
+                  >更新</v-btn>
                 </div>
               </article>
             </div>
@@ -796,9 +895,9 @@ function logout() {
                 color="error"
                 variant="text"
                 prepend-icon="mdi-stop-circle-outline"
-                :disabled="!dockerJob.cancellable"
+                :disabled="!dockerJob.cancellable || dockerJob.status === 'cancelling'"
                 @click="cancelDockerJob"
-              >{{ dockerJob.cancellable ? '中断' : '正在安全替换' }}</v-btn>
+              >{{ dockerJob.status === 'cancelling' ? '正在停止' : dockerJob.cancellable ? '中断' : '正在安全替换' }}</v-btn>
             </div>
             <v-progress-linear
               :model-value="dockerJob.progress"
@@ -1014,6 +1113,18 @@ function logout() {
 .section-heading h2 { margin: 0; font-size: 1.08rem; letter-spacing: 0; }
 .section-heading p { margin: 5px 0 0; color: rgba(var(--v-theme-on-surface),.56); font-size: .84rem; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 4px 16px; }
+.theme-color-control { display: grid; grid-column: 1 / -1; grid-template-columns: 48px minmax(180px, 280px) auto; align-items: center; justify-content: start; gap: 10px; margin-block: 2px 8px; }
+.theme-color-swatch { width: 48px; height: 48px; padding: 3px; border: 1px solid rgba(var(--v-theme-on-surface),.16); border-radius: 8px; background: rgb(var(--v-theme-surface)); cursor: pointer; }
+.theme-color-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+.theme-color-swatch::-webkit-color-swatch { border: 0; border-radius: 5px; }
+.theme-color-swatch::-moz-color-swatch { border: 0; border-radius: 5px; }
+.theme-color-presets { display: flex; grid-column: 1 / -1; align-items: center; flex-wrap: wrap; gap: 8px; margin: -2px 0 10px; }
+.theme-color-presets > span { margin-right: 3px; color: rgba(var(--v-theme-on-surface),.58); font-size: .78rem; }
+.theme-color-preset { display: grid; width: 28px; height: 28px; padding: 0; border: 2px solid rgba(var(--v-theme-on-surface),.12); border-radius: 50%; place-items: center; background: var(--preset-color); color: white; cursor: pointer; box-shadow: 0 0 0 1px rgba(var(--v-theme-surface),.9); transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.theme-color-preset:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px rgba(var(--v-theme-primary),.32); }
+.theme-color-preset.selected { border-color: rgb(var(--v-theme-surface)); box-shadow: 0 0 0 2px rgb(var(--v-theme-primary)); }
+.theme-color-preset:focus-visible { outline: 2px solid rgb(var(--v-theme-primary)); outline-offset: 2px; }
+.site-page-switches { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 8px 24px; }
 .switch-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); margin-bottom: 10px; }
 .editable-list, .item-list { display: grid; gap: 10px; }
 .editable-row, .item-row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 12px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgb(var(--v-theme-surface)); }
@@ -1060,18 +1171,35 @@ function logout() {
 .docker-summary > span { display: grid; min-width: 72px; }
 .docker-summary strong { font-size: 1.5rem; line-height: 1.1; }
 .docker-summary small { margin-top: 5px; color: rgba(var(--v-theme-on-surface),.56); font-size: .75rem; }
-.docker-list { display: grid; gap: 9px; }
-.docker-row { display: grid; grid-template-columns: 42px minmax(220px,1.2fr) minmax(170px,.7fr) minmax(190px,.9fr); align-items: center; min-width: 0; gap: 14px; padding: 14px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgb(var(--v-theme-surface)); }
-.docker-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 8px; background: rgba(var(--v-theme-on-surface),.07); color: rgb(var(--v-theme-primary)); }
-.docker-copy { display: grid; min-width: 0; }
+.docker-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 390px), 1fr)); gap: 18px; }
+.docker-row { --docker-progress: 0%; position: relative; display: flex; min-width: 0; min-height: 238px; overflow: hidden; flex-direction: column; padding: 22px; border: 1px solid rgba(var(--v-theme-on-surface),.14); border-radius: 8px; background: rgb(var(--v-theme-surface)); box-shadow: 0 8px 22px rgba(15, 23, 42, .07); transition: border-color .2s ease, box-shadow .2s ease; }
+.docker-row::before { position: absolute; z-index: 0; inset: 0 auto 0 0; width: 0; background: rgba(var(--v-theme-primary),.1); content: ''; transition: width .35s ease; }
+.docker-row > * { position: relative; z-index: 1; }
+.docker-row--updating { border-color: rgba(var(--v-theme-primary),.68); box-shadow: 0 10px 26px rgba(var(--v-theme-primary),.12); }
+.docker-row--updating::before { width: var(--docker-progress); }
+.docker-main { display: grid; grid-template-columns: 64px 7px minmax(0,1fr) auto; align-items: center; min-width: 0; gap: 16px; }
+.docker-icon { display: grid; width: 64px; height: 64px; place-items: center; border-radius: 8px; background: linear-gradient(135deg, #3985f5, #9b27ed); color: #fff; box-shadow: 0 8px 16px rgba(78, 93, 230, .2); }
+.docker-health { width: 7px; height: 44px; border-radius: 4px; background: rgba(var(--v-theme-on-surface),.2); }
+.docker-row--running .docker-health { background: rgb(var(--v-theme-success)); }
+.docker-row--updating .docker-health { background: rgb(var(--v-theme-primary)); }
+.docker-copy { display: grid; min-width: 0; line-height: 1.25; }
 .docker-copy strong, .docker-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.docker-copy small, .docker-action small, .docker-task-head small { margin-top: 3px; color: rgba(var(--v-theme-on-surface),.56); font-size: .74rem; }
-.docker-state { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.docker-action { display: grid; justify-items: end; min-width: 0; gap: 5px; }
-.docker-action small { overflow: hidden; flex: 1; text-align: right; text-overflow: ellipsis; }
-.docker-action .docker-error { color: rgb(var(--v-theme-error)); }
-.docker-controls { display: flex; align-items: center; justify-content: flex-end; min-height: 40px; gap: 2px; }
-.docker-controls .v-btn--icon { width: 36px; height: 36px; }
+.docker-copy strong { font-size: 1.2rem; font-weight: 700; }
+.docker-copy small, .docker-task-head small { margin-top: 5px; color: rgba(var(--v-theme-on-surface),.58); font-size: .82rem; }
+.docker-image { font-size: .88rem !important; }
+.docker-live-state { display: flex; align-items: center; gap: 5px; color: rgb(var(--v-theme-primary)) !important; }
+.docker-live-state .v-icon, .docker-inline-progress:disabled .v-icon { animation: docker-spin 1.1s linear infinite; }
+.docker-row--updating .docker-copy strong { color: rgb(var(--v-theme-primary)); }
+.docker-card-tools { display: flex; align-self: start; align-items: center; gap: 3px; }
+.docker-card-tools .v-btn { width: 36px; height: 36px; }
+.docker-note { display: block; overflow: hidden; margin-top: 12px; color: rgba(var(--v-theme-on-surface),.55); font-size: .74rem; text-overflow: ellipsis; white-space: nowrap; }
+.docker-note.docker-error { color: rgb(var(--v-theme-error)); }
+.docker-divider { height: 1px; margin-top: auto; margin-bottom: 16px; background: rgba(var(--v-theme-on-surface),.1); }
+.docker-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); min-height: 44px; gap: 8px; }
+.docker-controls .v-btn { height: 44px; min-width: 0; padding-inline: 10px; border-color: rgba(var(--v-theme-on-surface),.14); font-size: .88rem; }
+.docker-inline-progress { width: 100%; height: 44px; border-radius: 8px; font-variant-numeric: tabular-nums; }
+.docker-inline-progress:disabled { border-color: rgba(var(--v-theme-primary),.38); background: rgba(var(--v-theme-primary),.06); color: rgb(var(--v-theme-primary)); opacity: 1; }
+@keyframes docker-spin { to { transform: rotate(360deg); } }
 .docker-empty { display: grid; min-height: 180px; place-items: center; align-content: center; gap: 10px; color: rgba(var(--v-theme-on-surface),.52); }
 .docker-task-section { display: grid; gap: 14px; }
 .docker-task-head { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 14px; }
@@ -1094,14 +1222,11 @@ function logout() {
   .password-form, .username-form { grid-template-columns: 1fr 1fr; }
   .scan-controls { grid-template-columns: 1fr; }
   .background-upload { grid-template-columns: 1fr; }
+  .site-page-switches { grid-template-columns: 1fr; }
   .group-editor-head { grid-template-columns: 1fr; }
   .group-fields { grid-template-columns: 1fr; }
   .group-actions { justify-content: flex-end; }
-  .docker-row { grid-template-columns: 42px minmax(0,1fr) auto; }
-  .docker-state { grid-column: 2 / 4; }
-  .docker-action { grid-column: 2 / 4; justify-items: start; }
-  .docker-action small { text-align: left; }
-  .docker-controls { justify-content: flex-start; }
+  .docker-list { grid-template-columns: 1fr; }
 }
 @media (max-width: 540px) {
   .settings-window { margin-inline: -12px; }
@@ -1113,12 +1238,17 @@ function logout() {
   .password-form, .username-form { grid-template-columns: 1fr; }
   .scan-add-row { grid-template-columns: 1fr; }
   .scan-result { align-items: flex-start; flex-wrap: wrap; }
+  .theme-color-control { grid-template-columns: 44px minmax(0,1fr); }
+  .theme-color-swatch { width: 44px; height: 44px; }
+  .theme-color-control .v-btn { grid-column: 1 / -1; }
   .docker-summary { justify-content: space-between; gap: 12px; }
-  .docker-row { grid-template-columns: 38px minmax(0,1fr); align-items: start; gap: 10px; }
-  .docker-icon { width: 38px; height: 38px; }
-  .docker-state, .docker-action { grid-column: 1 / 3; }
-  .docker-action { justify-items: stretch; }
-  .docker-controls { flex-wrap: wrap; }
+  .docker-row { min-height: 222px; padding: 16px; }
+  .docker-main { grid-template-columns: 52px 6px minmax(0,1fr) auto; gap: 10px; }
+  .docker-icon { width: 52px; height: 52px; }
+  .docker-health { width: 6px; height: 38px; }
+  .docker-card-tools .v-chip { display: none; }
+  .docker-controls { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 6px; }
+  .docker-controls .v-btn { padding-inline: 6px; }
   .docker-task-head { grid-template-columns: minmax(0,1fr) auto; }
   .docker-task-head .v-btn { grid-column: 1 / 3; justify-self: start; }
   .docker-log { height: 220px; }

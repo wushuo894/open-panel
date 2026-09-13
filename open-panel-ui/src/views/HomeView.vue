@@ -8,6 +8,7 @@ import CornerControls from '../components/CornerControls.vue'
 import SearchBar from '../components/SearchBar.vue'
 import { api } from '../lib/api'
 import { appUrl } from '../lib/paths'
+import { applySiteTheme } from '../lib/theme'
 import { appState, loadAuth, loadPanel, loadStatuses } from '../stores/app'
 
 const router = useRouter()
@@ -22,6 +23,7 @@ const editorOpen = ref(false)
 const editorCard = ref(null)
 const originalGroupId = ref('')
 const draggedCardId = ref('')
+const activeGroupTab = ref('__all__')
 const pendingRemoval = ref(null)
 const notice = ref('')
 const editError = ref('')
@@ -38,6 +40,13 @@ const groups = computed(() => [...(panel.value?.groups || [])].sort((left, right
 const coverGroupId = computed(() => coverMode.value ? panel.value?.page?.cover?.groupIds?.[0] || '' : '')
 const coverGroup = computed(() => groups.value.find(group => group.id === coverGroupId.value))
 const bodyGroups = computed(() => groups.value.filter(group => group.id !== coverGroupId.value))
+const navigationGroups = computed(() => coverMode.value ? bodyGroups.value : groups.value)
+const groupLayout = computed(() => panel.value?.page?.groupLayout || 'sections')
+const tabsShowAll = computed(() => panel.value?.page?.tabsShowAll !== false)
+const renderedGroups = computed(() => {
+  if (groupLayout.value !== 'tabs' || (tabsShowAll.value && activeGroupTab.value === '__all__')) return navigationGroups.value
+  return navigationGroups.value.filter(group => group.id === activeGroupTab.value)
+})
 const timeText = computed(() => {
   const withSeconds = panel.value?.page?.banner?.showSeconds
   return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: withSeconds ? '2-digit' : undefined, hour12: false }).format(now.value)
@@ -203,9 +212,7 @@ function scrollToNavigation() {
 }
 
 function applyTheme() {
-  const configured = panel.value?.site?.theme || 'system'
-  const dark = configured === 'dark' || (configured === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
-  theme.global.name.value = dark ? 'openPanelDark' : 'openPanelLight'
+  applySiteTheme(theme, panel.value?.site)
 }
 
 function startWallpaperRotation() {
@@ -230,6 +237,14 @@ onMounted(async () => {
   }
 })
 watch(panel, () => { if (panel.value) { applyTheme(); startWallpaperRotation() } })
+watch([navigationGroups, tabsShowAll], ([value, showAll]) => {
+  const currentExists = value.some(group => group.id === activeGroupTab.value)
+  if (showAll) {
+    if (activeGroupTab.value !== '__all__' && !currentExists) activeGroupTab.value = '__all__'
+  } else if (activeGroupTab.value === '__all__' || !currentExists) {
+    activeGroupTab.value = value[0]?.id || ''
+  }
+}, { immediate: true })
 onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer) })
 </script>
 
@@ -326,14 +341,28 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
           </div>
           <SearchBar :engines="panel.searchEngines" />
         </header>
+        <v-tabs
+          v-if="groupLayout === 'tabs' && navigationGroups.length"
+          v-model="activeGroupTab"
+          class="group-tabs"
+          show-arrows
+          density="compact"
+          slider-color="transparent"
+        >
+          <v-tab v-if="tabsShowAll" value="__all__" prepend-icon="mdi-view-grid-outline">全部</v-tab>
+          <v-tab v-for="group in navigationGroups" :key="group.id" :value="group.id" :prepend-icon="group.icon">
+            {{ group.title }}
+          </v-tab>
+        </v-tabs>
         <CardGroup
-          v-for="group in (coverMode ? bodyGroups : groups)"
+          v-for="group in renderedGroups"
           :key="group.id"
           :group="group"
           :cards="cardsFor(group)"
           :statuses="appState.statuses"
           :editing="editing"
           :dragged-card-id="draggedCardId"
+          :hide-header="groupLayout === 'tabs' && activeGroupTab !== '__all__'"
           @add-card="newCard"
           @edit-card="editCard"
           @remove-card="requestRemoveCard"
@@ -343,7 +372,7 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
           @drop-card="dropCard"
           @drop-group="dropCardIntoGroup"
         />
-        <div v-if="!(coverMode ? bodyGroups : groups).length" class="empty-state">
+        <div v-if="!navigationGroups.length" class="empty-state">
           <v-icon icon="mdi-view-grid-plus-outline" size="34" />
           <p>暂无导航分组</p>
         </div>
@@ -381,6 +410,7 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
 </template>
 
 <style scoped>
+.page-shell { display: flex; flex-direction: column; }
 .loading { position: fixed; z-index: 100; top: 0; }
 .cover-panel { position: relative; min-height: 100svh; display: flex; align-items: center; overflow: hidden; color: white; background: transparent; }
 .cover-content { position: relative; z-index: 1; display: grid; gap: 27px; padding-block: 88px 76px; }
@@ -396,7 +426,7 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
 .scroll-hint { position: absolute; z-index: 2; bottom: 0; left: 50%; display: grid; width: 96px; height: 58px; padding: 0; border: 0; place-items: center; background: transparent; color: white; cursor: pointer; transform: translateX(-50%); opacity: 0; transition: opacity .18s ease, transform .18s ease; }
 .scroll-hint:focus-visible { opacity: .82; transform: translateX(-50%) translateY(-3px); }
 .navigation-band { min-height: 340px; padding-block: 26px 48px; background: rgb(var(--v-theme-background)); }
-.navigation-band.list-mode { min-height: 0; padding: 24px 0 0; }
+.navigation-band.list-mode { min-height: 0; flex: 1 0 auto; padding: 24px 0 0; }
 .page-shell.wallpaper-page { position: relative; isolation: isolate; background: transparent; color: white; }
 .page-shell.wallpaper-page::before { content: ''; position: fixed; z-index: -1; inset: 0; background-image: linear-gradient(rgba(8,12,11,var(--overlay)), rgba(8,12,11,var(--overlay))), var(--wallpaper); background-position: center; background-size: cover; pointer-events: none; transform: translateZ(0); }
 .wallpaper-page .navigation-band { background: transparent; }
@@ -412,6 +442,12 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
 .list-banner time { font-size: 2.45rem; }
 .list-banner .banner-date { font-size: .92rem; }
 .list-banner .banner-quote { color: rgba(255,255,255,.76); }
+.group-tabs { max-width: 100%; margin: 10px 0 8px; }
+.group-tabs :deep(.v-slide-group__content) { gap: 8px; }
+.group-tabs :deep(.v-tab) { min-width: auto; height: 40px; padding-inline: 15px; border: 1px solid rgba(255,255,255,.16); border-radius: 8px; background: rgba(20,25,34,.56); color: rgba(255,255,255,.72); text-shadow: none; }
+.group-tabs :deep(.v-tab:hover) { background: rgba(28,35,44,.72); color: #fff; }
+.group-tabs :deep(.v-tab--selected) { border-color: rgba(255,255,255,.72); background: rgba(255,255,255,.92); color: #202624; }
+.group-tabs :deep(.v-tab__slider) { display: none; }
 .footer { padding: 20px; border-top: 1px solid rgba(var(--v-theme-on-surface), .08); background: rgb(var(--v-theme-background)); color: rgba(var(--v-theme-on-surface), .52); text-align: center; font-size: .78rem; line-height: 1.65; }
 .empty-state, .error-state { display: grid; place-items: center; gap: 9px; min-height: 260px; color: rgba(var(--v-theme-on-surface), .58); text-align: center; }
 .error-state { position: fixed; z-index: 20; inset: 0; background: rgb(var(--v-theme-background)); }

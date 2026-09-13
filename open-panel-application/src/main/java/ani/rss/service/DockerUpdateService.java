@@ -57,6 +57,7 @@ import java.util.function.IntConsumer;
 public class DockerUpdateService {
     private static final int MAX_JOBS = 12;
     private static final int MAX_LOGS = 300;
+    private static final String SOURCE_IMAGE_LABEL = "io.github.wushuo894.open-panel.source-image";
     private final JsonConfigRepository repository;
     private final Map<String, JobState> jobs = new ConcurrentHashMap<>();
     private final Set<String> checkedImages = ConcurrentHashMap.newKeySet();
@@ -96,7 +97,7 @@ public class DockerUpdateService {
             return new DockerUpdateModels.ComposeView()
                     .setContainerId(container.getId())
                     .setContainerName(containerName(container))
-                    .setContent(composeYaml(inspect));
+                    .setContent(composeYaml(connection.client(), container, inspect));
         } catch (IllegalArgumentException exception) {
             throw exception;
         } catch (Exception | LinkageError exception) {
@@ -122,12 +123,12 @@ public class DockerUpdateService {
         }
     }
 
-    private String composeYaml(InspectContainerResponse inspect) {
+    private String composeYaml(DockerClient docker, Container container, InspectContainerResponse inspect) {
         String name = cleanName(inspect.getName());
         ContainerConfig config = inspect.getConfig();
         HostConfig host = inspect.getHostConfig();
         Map<String, Object> service = new LinkedHashMap<>();
-        service.put("image", config == null ? inspect.getImageId() : config.getImage());
+        service.put("image", resolveContainerImage(docker, container, inspect));
         service.put("container_name", name);
         if (config != null) {
             putText(service, "hostname", config.getHostName());
@@ -364,10 +365,14 @@ public class DockerUpdateService {
         state.job.setStatus("running").setPhase("loading");
         log(state, "info", "正在读取容器列表");
         try (DockerConnection connection = connect(Duration.ofMinutes(30))) {
-            List<Container> containers = connection.client().listContainersCmd().withShowAll(true).exec();
+            DockerClient docker = connection.client();
+            List<Container> containers = docker.listContainersCmd().withShowAll(true).exec();
             Map<String, String> images = new LinkedHashMap<>();
-            containers.stream().filter(container -> pullableImage(container.getImage())).forEach(container ->
-                    images.putIfAbsent(container.getImage(), container.getImageId()));
+            for (Container container : containers) {
+                InspectContainerResponse inspect = inspectContainer(docker, container.getId());
+                String image = resolveContainerImage(docker, container, inspect);
+                if (pullableImage(image)) images.putIfAbsent(image, container.getImageId());
+            }
             state.job.setTotalItems(images.size());
             if (images.isEmpty()) {
                 complete(state, "没有可检查更新的镜像");
@@ -411,7 +416,7 @@ public class DockerUpdateService {
             Container listed = findContainer(docker, containerId);
             InspectContainerResponse inspect = docker.inspectContainerCmd(listed.getId()).exec();
             String name = containerName(listed);
-            String image = inspect.getConfig() == null ? listed.getImage() : inspect.getConfig().getImage();
+            String image = resolveContainerImage(docker, listed, inspect);
             state.job.setContainerId(listed.getId()).setContainerName(name).setImage(image);
             String blockReason = updateBlockReason(listed, inspect, image);
             if (!blockReason.isBlank()) throw new IllegalStateException(blockReason);
@@ -494,8 +499,7 @@ public class DockerUpdateService {
                 }
             }
             tagOriginal(docker, oldImageId, reference);
-            String restoredId = createFromSnapshot(docker, original,
-                    original.getConfig() == null ? oldImageId : original.getConfig().getImage());
+            String restoredId = createFromSnapshot(docker, original, reference.namedReference());
             connectAdditionalNetworks(docker, restoredId, original);
             if (wasRunning) docker.startContainerCmd(restoredId).exec();
             log(state, "warn", "旧容器已恢复");
@@ -520,7 +524,10 @@ public class DockerUpdateService {
             if (config.getDomainName() != null) command.withDomainName(config.getDomainName());
             if (config.getUser() != null) command.withUser(config.getUser());
             if (config.getWorkingDir() != null) command.withWorkingDir(config.getWorkingDir());
-            if (config.getLabels() != null) command.withLabels(config.getLabels());
+            Map<String, String> labels = config.getLabels() == null
+                    ? new LinkedHashMap<>() : new LinkedHashMap<>(config.getLabels());
+            labels.put(SOURCE_IMAGE_LABEL, image);
+            command.withLabels(labels);
             if (config.getHealthcheck() != null) command.withHealthcheck(config.getHealthcheck());
             if (config.getAttachStdin() != null) command.withAttachStdin(config.getAttachStdin());
             if (config.getAttachStdout() != null) command.withAttachStdout(config.getAttachStdout());
@@ -726,15 +733,11 @@ public class DockerUpdateService {
 
     private DockerUpdateModels.ContainerInfo containerInfo(DockerClient docker, Container container,
                                                             Map<String, String> latestIds) {
-        String image = Objects.toString(container.getImage(), "");
+        InspectContainerResponse inspect = inspectContainer(docker, container.getId());
+        String image = resolveContainerImage(docker, container, inspect);
         StagedImage staged = stagedImages.get(image);
         String latestId = staged != null ? staged.newImageId()
                 : image.isBlank() ? "" : latestIds.computeIfAbsent(image, key -> inspectImageId(docker, key));
-        InspectContainerResponse inspect = null;
-        try {
-            inspect = docker.inspectContainerCmd(container.getId()).exec();
-        } catch (Exception ignored) {
-        }
         String reason = updateBlockReason(container, inspect, image);
         boolean checked = checkedImages.contains(image);
         long uptimeSeconds = inspect == null || inspect.getState() == null
@@ -755,6 +758,62 @@ public class DockerUpdateService {
                 .setSelf(isSelf(container))
                 .setReason(reason)
                 .setCheckError(imageCheckErrors.getOrDefault(image, ""));
+    }
+
+    private InspectContainerResponse inspectContainer(DockerClient docker, String containerId) {
+        try {
+            return docker.inspectContainerCmd(containerId).exec();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String resolveContainerImage(DockerClient docker, Container container, InspectContainerResponse inspect) {
+        String configured = inspect == null || inspect.getConfig() == null
+                ? "" : Objects.toString(inspect.getConfig().getImage(), "");
+        if (configured.contains("@sha256:") || usableImageName(configured)) return configured;
+
+        String listed = Objects.toString(container.getImage(), "");
+        if (listed.contains("@sha256:") || usableImageName(listed)) return listed;
+
+        String imageId = inspect != null && notBlank(inspect.getImageId())
+                ? inspect.getImageId() : container.getImageId();
+        String stagedName = stagedImages.entrySet().stream()
+                .filter(entry -> sameImage(entry.getValue().newImageId(), imageId))
+                .map(Map.Entry::getKey)
+                .filter(this::usableImageName)
+                .findFirst()
+                .orElse("");
+        if (notBlank(stagedName)) return stagedName;
+
+        if (inspect != null && inspect.getConfig() != null && inspect.getConfig().getLabels() != null) {
+            String sourceImage = inspect.getConfig().getLabels().get(SOURCE_IMAGE_LABEL);
+            if (usableImageName(sourceImage)) return sourceImage;
+        }
+
+        try {
+            List<String> tags = docker.inspectImageCmd(imageId).exec().getRepoTags();
+            if (tags != null) {
+                return tags.stream()
+                        .filter(this::usableImageName)
+                        .sorted(String.CASE_INSENSITIVE_ORDER)
+                        .findFirst()
+                        .orElseGet(() -> notBlank(configured) ? configured : listed);
+            }
+        } catch (Exception ignored) {
+        }
+        return notBlank(configured) ? configured : listed;
+    }
+
+    private boolean usableImageName(String image) {
+        return pullableImage(image) && !hasHashTag(image);
+    }
+
+    private boolean hasHashTag(String image) {
+        if (!notBlank(image)) return false;
+        int slash = image.lastIndexOf('/');
+        int colon = image.lastIndexOf(':');
+        return colon > slash && image.substring(colon + 1).matches("(?i)[a-f0-9]{64}");
     }
 
     private String updateBlockReason(Container container, InspectContainerResponse inspect, String image) {
@@ -961,6 +1020,9 @@ public class DockerUpdateService {
     }
 
     private record ImageReference(String repository, String tag) {
+        private String namedReference() {
+            return repository + ':' + tag;
+        }
     }
 
     private record StagedImage(ImageReference reference, String previousImageId, String newImageId,
