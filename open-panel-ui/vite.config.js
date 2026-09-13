@@ -2,6 +2,7 @@ import {defineConfig} from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vuetify from 'vite-plugin-vuetify'
 import {VitePWA} from 'vite-plugin-pwa'
+import viteCompression from 'vite-plugin-compression'
 
 let serverHost = process.env['SERVER_HOST'];
 
@@ -29,6 +30,18 @@ export default defineConfig({
                     }
                 ]
             }
+        }),
+        viteCompression({
+            algorithm: 'gzip',
+            ext: '.gz',
+            threshold: 10240,
+            deleteOriginFile: false
+        }),
+        viteCompression({
+            algorithm: 'brotliCompress',
+            ext: '.br',
+            threshold: 10240,
+            deleteOriginFile: false
         })
     ],
     server: {

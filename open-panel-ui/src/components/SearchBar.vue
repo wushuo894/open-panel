@@ -42,11 +42,11 @@ function search() {
   margin-inline: auto;
   padding-inline: 6px;
   border: 1px solid rgba(var(--v-theme-on-surface), .12);
-  border-radius: 8px;
-  background: rgb(var(--v-theme-surface));
+  border-radius: var(--surface-radius, 8px);
+  background: rgba(var(--v-theme-surface), var(--surface-opacity, 1));
   color: rgb(var(--v-theme-on-surface));
   box-shadow: 0 10px 35px rgba(22,29,25,.10);
 }
-.search-bar.glass { border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.88); color: #151a18; backdrop-filter: blur(18px); }
+.search-bar.glass { border-color: rgba(255,255,255,.28); background: rgba(255,255,255,var(--surface-opacity,.72)); color: #151a18; backdrop-filter: blur(18px); }
 input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; letter-spacing: 0; }
 </style>

@@ -10,7 +10,7 @@ import java.util.List;
 @Data
 @Accessors(chain = true)
 public class PanelConfig implements Serializable {
-    private int schemaVersion = 9;
+    private int schemaVersion = 10;
     private Site site = new Site();
     private Page page = new Page();
     private Security security = new Security();
@@ -37,6 +37,9 @@ public class PanelConfig implements Serializable {
         private String mode = "cover";
         private String groupLayout = "sections";
         private boolean tabsShowAll = true;
+        private boolean searchVisible = true;
+        private double surfaceTransparency = 0.28;
+        private int surfaceRadius = 8;
         private Banner banner = new Banner();
         private Cover cover = new Cover();
         private Footer footer = new Footer();

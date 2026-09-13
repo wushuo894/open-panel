@@ -43,6 +43,8 @@ const composeLoading = ref(false)
 const composeView = ref(null)
 const cleanupDialog = ref(false)
 const cleanupLoading = ref(false)
+const cleanupPreviewLoading = ref(false)
+const cleanupPreview = ref(null)
 const dockerClock = ref(Date.now())
 const dockerOverviewLoadedAt = ref(Date.now())
 const predefinedThemeColors = [
@@ -89,6 +91,8 @@ const scanRunning = computed(() => ['queued', 'running', 'cancelling'].includes(
 const scanProgress = computed(() => scanJob.value?.total ? Math.round(scanJob.value.scanned / scanJob.value.total * 100) : 0)
 const dockerJobRunning = computed(() => ['queued', 'running', 'cancelling'].includes(dockerJob.value?.status))
 const dockerUpdates = computed(() => dockerOverview.value.containers.filter(container => container.updateAvailable).length)
+const sortedDockerContainers = computed(() => [...dockerOverview.value.containers]
+  .sort((left, right) => Number(Boolean(right.updateAvailable)) - Number(Boolean(left.updateAvailable))))
 
 onMounted(() => {
   load()
@@ -307,7 +311,7 @@ async function exportConfig() {
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = 'open-panel-config.json'
+    anchor.download = 'open-panel-config.zip'
     anchor.click()
     URL.revokeObjectURL(url)
   } catch (e) { error.value = e.message }
@@ -316,6 +320,11 @@ async function exportConfig() {
 async function importConfig(event) {
   const file = event.target.files?.[0]
   if (!file) return
+  if (!file.name.toLowerCase().endsWith('.zip')) {
+    error.value = '请选择 ZIP 配置备份'
+    event.target.value = ''
+    return
+  }
   const body = new FormData()
   body.append('file', file)
   try {
@@ -450,6 +459,31 @@ async function cleanupDockerImages() {
     await loadDockerOverview(false)
   } catch (e) { error.value = e.message }
   finally { cleanupLoading.value = false }
+}
+
+async function openCleanupDialog() {
+  cleanupDialog.value = true
+  cleanupPreviewLoading.value = true
+  cleanupPreview.value = null
+  error.value = ''
+  try {
+    cleanupPreview.value = await api('/api/admin/docker/images/unused')
+  } catch (e) {
+    error.value = e.message
+    cleanupDialog.value = false
+  } finally {
+    cleanupPreviewLoading.value = false
+  }
+}
+
+function cleanupImageName(image) {
+  return image.references?.[0] || '未命名镜像'
+}
+
+function cleanupImageDetail(image) {
+  const id = String(image.id || '').replace(/^sha256:/, '').slice(0, 12) || '未知 ID'
+  const more = image.references?.length > 1 ? ` · 另有 ${image.references.length - 1} 个标签` : ''
+  return `${id} · ${formatBytes(image.size)}${more}`
 }
 
 function dockerStateLabel(state) {
@@ -653,6 +687,14 @@ function logout() {
           </section>
 
           <section class="settings-section">
+            <div class="section-heading"><div><h2>卡片与搜索框</h2><p>统一调整首页导航控件的外观</p></div><v-switch v-model="config.page.searchVisible" label="显示搜索框" color="primary" hide-details /></div>
+            <div class="form-grid">
+              <v-slider v-model="config.page.surfaceTransparency" label="透明度" :min="0" :max="0.9" :step="0.05" thumb-label />
+              <v-slider v-model="config.page.surfaceRadius" label="圆角（px）" :min="0" :max="32" :step="1" thumb-label />
+            </div>
+          </section>
+
+          <section class="settings-section">
             <div class="section-heading"><div><h2>Banner</h2><p>首页时间、标题和一句话</p></div><v-switch v-model="config.page.banner.visible" label="显示" color="primary" hide-details /></div>
             <div class="form-grid">
               <v-switch v-model="config.page.banner.showTime" label="显示时间" color="primary" hide-details />
@@ -790,7 +832,7 @@ function logout() {
                   color="error"
                   prepend-icon="mdi-delete-sweep-outline"
                   :disabled="dockerJobRunning || !!dockerAction"
-                  @click="cleanupDialog = true"
+                  @click="openCleanupDialog"
                 >清理镜像</v-btn>
               </div>
             </div>
@@ -803,7 +845,7 @@ function logout() {
 
             <div v-if="dockerOverview.containers.length" class="docker-list">
               <article
-                v-for="container in dockerOverview.containers"
+                v-for="container in sortedDockerContainers"
                 :key="container.id"
                 class="docker-row"
                 :class="{ 'docker-row--updating': containerIsUpdating(container) }"
@@ -1010,11 +1052,11 @@ function logout() {
 
         <v-window-item value="data">
           <section class="settings-section">
-            <div class="section-heading"><div><h2>配置备份</h2><p>导出文件包含完整配置和凭据，请妥善保管</p></div></div>
+            <div class="section-heading"><div><h2>配置备份</h2><p>ZIP 备份包含完整配置、凭据和已上传图片，请妥善保管</p></div></div>
             <div class="action-row">
               <v-btn prepend-icon="mdi-download-outline" variant="outlined" @click="exportConfig">导出配置</v-btn>
               <v-btn prepend-icon="mdi-upload-outline" variant="outlined" @click="importInput.click()">导入配置</v-btn>
-              <input ref="importInput" type="file" accept="application/json,.json" hidden @change="importConfig" />
+              <input ref="importInput" type="file" accept="application/zip,application/x-zip-compressed,.zip" hidden @change="importConfig" />
             </div>
           </section>
         </v-window-item>
@@ -1099,16 +1141,41 @@ function logout() {
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="cleanupDialog" max-width="480" persistent>
+    <v-dialog v-model="cleanupDialog" max-width="680" scrollable persistent>
       <v-card>
         <v-card-title>清理未使用镜像</v-card-title>
-        <v-card-text>
-          将删除所有未被现存容器引用的镜像，包括更新时保留的旧 Hash 镜像。运行中和已停止容器正在使用的镜像不会被删除。
+        <v-card-text class="cleanup-dialog-content">
+          <v-progress-linear v-if="cleanupPreviewLoading" indeterminate color="secondary" />
+          <template v-else-if="cleanupPreview">
+            <div v-if="cleanupPreview.images.length" class="cleanup-summary">
+              <strong>将清理 {{ cleanupPreview.images.length }} 个镜像</strong>
+              <small>镜像大小合计 {{ formatBytes(cleanupPreview.totalSize) }}</small>
+            </div>
+            <div v-if="cleanupPreview.images.length" class="cleanup-image-list">
+              <div v-for="image in cleanupPreview.images" :key="image.id" class="cleanup-image-row">
+                <v-icon icon="mdi-package-variant" size="22" />
+                <span>
+                  <strong :title="image.references?.join('\n')">{{ cleanupImageName(image) }}</strong>
+                  <small>{{ cleanupImageDetail(image) }}</small>
+                </span>
+              </div>
+            </div>
+            <div v-else class="cleanup-empty">
+              <v-icon icon="mdi-check-circle-outline" size="30" />
+              <span>没有可清理的未使用镜像</span>
+            </div>
+          </template>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
           <v-btn :disabled="cleanupLoading" @click="cleanupDialog = false">取消</v-btn>
-          <v-btn color="error" prepend-icon="mdi-delete-sweep-outline" :loading="cleanupLoading" @click="cleanupDockerImages">确认清理</v-btn>
+          <v-btn
+            color="error"
+            prepend-icon="mdi-delete-sweep-outline"
+            :loading="cleanupLoading"
+            :disabled="cleanupPreviewLoading || !cleanupPreview?.images?.length"
+            @click="cleanupDockerImages"
+          >确认清理</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -1230,6 +1297,17 @@ function logout() {
 .compose-title { display: flex; align-items: center; min-height: 58px; }
 .compose-source { max-height: min(68svh, 720px); overflow: auto; margin: 0; padding: 16px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgba(var(--v-theme-on-surface),.045); color: rgb(var(--v-theme-on-surface)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .78rem; line-height: 1.6; white-space: pre; }
 .compose-filename { padding-left: 8px; color: rgba(var(--v-theme-on-surface),.56); }
+.cleanup-dialog-content { display: grid; min-height: 150px; gap: 14px; }
+.cleanup-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+.cleanup-summary small { color: rgba(var(--v-theme-on-surface),.58); font-size: .76rem; }
+.cleanup-image-list { display: grid; max-height: min(52svh, 480px); gap: 2px; overflow-y: auto; }
+.cleanup-image-row { display: flex; align-items: center; min-width: 0; gap: 11px; padding: 10px 8px; border-bottom: 1px solid rgba(var(--v-theme-on-surface),.08); }
+.cleanup-image-row > .v-icon { flex: 0 0 auto; color: rgba(var(--v-theme-on-surface),.6); }
+.cleanup-image-row > span { display: grid; min-width: 0; gap: 3px; }
+.cleanup-image-row strong, .cleanup-image-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cleanup-image-row strong { font-size: .86rem; }
+.cleanup-image-row small { color: rgba(var(--v-theme-on-surface),.54); font-size: .73rem; font-variant-numeric: tabular-nums; }
+.cleanup-empty { display: grid; min-height: 120px; place-items: center; align-content: center; gap: 9px; color: rgba(var(--v-theme-on-surface),.54); }
 @media (max-width: 820px) {
   .form-grid { grid-template-columns: 1fr; }
   .switch-grid { grid-template-columns: repeat(2, 1fr); }

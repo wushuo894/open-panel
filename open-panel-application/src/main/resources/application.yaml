@@ -5,8 +5,13 @@ spring:
     enabled: false
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 50MB
+      max-file-size: 200MB
+      max-request-size: 205MB
+  web:
+    resources:
+      chain:
+        enabled: true
+        compressed: true
 
 server:
   port: ${SERVER_PORT:7788}

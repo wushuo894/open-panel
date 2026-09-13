@@ -6,7 +6,7 @@ import ani.rss.entity.web.AuthPayloads;
 import ani.rss.entity.web.DockerUpdateModels;
 import ani.rss.entity.web.Result;
 import ani.rss.entity.web.WebScanModels;
-import ani.rss.repository.JsonConfigRepository;
+import ani.rss.service.ConfigBackupService;
 import ani.rss.service.DockerUpdateService;
 import ani.rss.service.PanelService;
 import ani.rss.service.StatusService;
@@ -25,28 +25,28 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.List;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
     private final PanelService panelService;
-    private final JsonConfigRepository repository;
+    private final ConfigBackupService configBackupService;
     private final AuthService authService;
     private final UpdateService updateService;
     private final StatusService statusService;
     private final WebScanService webScanService;
     private final DockerUpdateService dockerUpdateService;
 
-    public AdminController(PanelService panelService, JsonConfigRepository repository,
+    public AdminController(PanelService panelService, ConfigBackupService configBackupService,
                            AuthService authService, UpdateService updateService, StatusService statusService,
                            WebScanService webScanService, DockerUpdateService dockerUpdateService) {
         this.panelService = panelService;
-        this.repository = repository;
+        this.configBackupService = configBackupService;
         this.authService = authService;
         this.updateService = updateService;
         this.statusService = statusService;
@@ -65,21 +65,17 @@ public class AdminController {
     }
 
     @GetMapping("/config/export")
-    public ResponseEntity<byte[]> exportConfig() {
-        String filename = "open-panel-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".json";
+    public ResponseEntity<StreamingResponseBody> exportConfig() {
+        String filename = "open-panel-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".zip";
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(filename).build().toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(repository.exportJson().getBytes(StandardCharsets.UTF_8));
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .body(configBackupService::exportTo);
     }
 
     @PostMapping(value = "/config/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Result<PanelConfig> importConfig(@RequestPart("file") MultipartFile file) throws Exception {
-        if (file.isEmpty() || file.getSize() > 5 * 1024 * 1024) {
-            throw new IllegalArgumentException("配置文件为空或超过 5 MB");
-        }
-        PanelConfig config = repository.parse(new String(file.getBytes(), StandardCharsets.UTF_8));
-        repository.replace(config);
+        configBackupService.importArchive(file);
         return Result.ok(panelService.adminConfig());
     }
 
@@ -114,6 +110,11 @@ public class AdminController {
     @org.springframework.web.bind.annotation.DeleteMapping("/docker/images/unused")
     public Result<DockerUpdateModels.ImageCleanupResult> cleanupDockerImages() {
         return Result.ok(dockerUpdateService.cleanupUnusedImages());
+    }
+
+    @GetMapping("/docker/images/unused")
+    public Result<DockerUpdateModels.ImageCleanupPreview> previewDockerImageCleanup() {
+        return Result.ok(dockerUpdateService.previewUnusedImages());
     }
 
     @GetMapping("/docker")

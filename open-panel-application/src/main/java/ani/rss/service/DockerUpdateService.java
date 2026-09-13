@@ -16,6 +16,7 @@ import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ContainerConfig;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.HostConfig;
+import com.github.dockerjava.api.model.Image;
 import com.github.dockerjava.api.model.PullResponseItem;
 import com.github.dockerjava.api.model.PruneType;
 import com.github.dockerjava.api.model.Volume;
@@ -153,6 +154,42 @@ public class DockerUpdateService {
         } catch (Exception | LinkageError exception) {
             throw new IllegalStateException("清理未使用镜像失败: " + safeMessage(exception), exception);
         }
+    }
+
+    public DockerUpdateModels.ImageCleanupPreview previewUnusedImages() {
+        assertIdle();
+        try (DockerConnection connection = connect(Duration.ofSeconds(12))) {
+            DockerClient docker = connection.client();
+            Set<String> usedImageIds = docker.listContainersCmd().withShowAll(true).exec().stream()
+                    .map(Container::getImageId)
+                    .filter(Objects::nonNull)
+                    .map(this::normalizeImageId)
+                    .collect(java.util.stream.Collectors.toSet());
+            List<DockerUpdateModels.UnusedImage> images = docker.listImagesCmd().withShowAll(true).exec().stream()
+                    .filter(image -> !usedImageIds.contains(normalizeImageId(image.getId())))
+                    .map(this::unusedImage)
+                    .sorted(Comparator.comparing(image -> image.getReferences().isEmpty()
+                            ? image.getId() : image.getReferences().getFirst(), String.CASE_INSENSITIVE_ORDER))
+                    .toList();
+            long totalSize = images.stream().mapToLong(DockerUpdateModels.UnusedImage::getSize).sum();
+            return new DockerUpdateModels.ImageCleanupPreview().setImages(images).setTotalSize(totalSize);
+        } catch (Exception | LinkageError exception) {
+            throw new IllegalStateException("读取待清理镜像失败: " + safeMessage(exception), exception);
+        }
+    }
+
+    private DockerUpdateModels.UnusedImage unusedImage(Image image) {
+        List<String> references = image.getRepoTags() == null ? new ArrayList<>()
+                : Arrays.stream(image.getRepoTags())
+                .filter(this::notBlank)
+                .filter(reference -> !reference.contains("<none>"))
+                .distinct()
+                .sorted(String.CASE_INSENSITIVE_ORDER)
+                .toList();
+        return new DockerUpdateModels.UnusedImage()
+                .setId(Objects.toString(image.getId(), ""))
+                .setReferences(references)
+                .setSize(image.getSize() == null ? 0 : image.getSize());
     }
 
     private String composeYaml(DockerClient docker, Container container, InspectContainerResponse inspect) {

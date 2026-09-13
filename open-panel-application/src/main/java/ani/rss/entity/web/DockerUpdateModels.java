@@ -63,6 +63,21 @@ public final class DockerUpdateModels {
 
     @Data
     @Accessors(chain = true)
+    public static class ImageCleanupPreview implements Serializable {
+        private List<UnusedImage> images = new ArrayList<>();
+        private long totalSize;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class UnusedImage implements Serializable {
+        private String id;
+        private List<String> references = new ArrayList<>();
+        private long size;
+    }
+
+    @Data
+    @Accessors(chain = true)
     public static class DockerJob implements Serializable {
         private String id;
         private String type;

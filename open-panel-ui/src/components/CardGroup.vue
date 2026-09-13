@@ -306,15 +306,15 @@ async function controlDocker(card, action) {
   gap: 13px;
   padding: 14px;
   border: 1px solid rgba(var(--v-theme-on-surface), .09);
-  border-radius: 8px;
-  background: rgba(var(--v-theme-surface), .72);
+  border-radius: var(--surface-radius, 8px);
+  background: rgba(var(--v-theme-surface), var(--surface-opacity, .72));
   color: rgb(var(--v-theme-on-surface));
   cursor: pointer;
   text-align: left;
   backdrop-filter: blur(14px);
   transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
 }
-.cover .nav-card { border-color: rgba(255,255,255,.22); background: rgba(21,26,25,.5); color: white; }
+.cover .nav-card { border-color: rgba(255,255,255,.22); background: rgba(21,26,25,var(--surface-opacity,.72)); color: white; }
 .nav-card:hover { transform: translateY(-2px); border-color: rgba(var(--v-theme-primary), .28); box-shadow: 0 9px 26px rgba(17,24,20,.12); }
 .nav-card[role="link"], .nav-card[role="link"] * { cursor: pointer; }
 .nav-card:focus-visible { outline: 2px solid rgb(var(--v-theme-primary)); outline-offset: 2px; }
@@ -325,13 +325,13 @@ async function controlDocker(card, action) {
 .nav-card.card-hidden { opacity: .55; border-style: dashed; }
 .nav-card.dragging { opacity: .35; }
 .editing-grid .nav-card { cursor: grab; }
-.card-drop-placeholder { min-width: 0; height: 86px; border: 2px dashed rgba(var(--v-theme-primary), .62); border-radius: 8px; background: rgba(var(--v-theme-primary), .1); box-shadow: inset 0 0 0 1px rgba(var(--v-theme-primary), .08); }
+.card-drop-placeholder { min-width: 0; height: 86px; border: 2px dashed rgba(var(--v-theme-primary), .62); border-radius: var(--surface-radius, 8px); background: rgba(var(--v-theme-primary), .1); box-shadow: inset 0 0 0 1px rgba(var(--v-theme-primary), .08); }
 .cover .card-drop-placeholder { border-color: rgba(233,255,112,.68); background: rgba(233,255,112,.1); box-shadow: inset 0 0 0 1px rgba(233,255,112,.08); }
 .card-drop-placeholder.icon-only { width: 68px; height: 68px; }
 .card-edit-actions { position: absolute; z-index: 3; inset: 0; display: flex; align-items: center; justify-content: center; gap: 5px; border-radius: inherit; background: rgba(18,22,21,.68); opacity: 0; transition: opacity .16s ease; }
 .nav-card:hover .card-edit-actions, .nav-card:focus-within .card-edit-actions { opacity: 1; }
 .card-edit-actions :deep(.v-btn) { background: rgba(255,255,255,.9); color: #202624; }
-.add-card-tile { display: flex; align-items: center; justify-content: center; min-width: 0; height: 86px; gap: 7px; padding: 12px; border: 1px dashed rgba(var(--v-theme-on-surface), .28); border-radius: 8px; background: rgba(var(--v-theme-surface), .38); color: currentColor; cursor: pointer; }
+.add-card-tile { display: flex; align-items: center; justify-content: center; min-width: 0; height: 86px; gap: 7px; padding: 12px; border: 1px dashed rgba(var(--v-theme-on-surface), .28); border-radius: var(--surface-radius, 8px); background: rgba(var(--v-theme-surface), .38); color: currentColor; cursor: pointer; }
 .icon-grid .add-card-tile { width: 68px; height: 68px; padding: 6px; }
 .icon-grid .add-card-tile span { display: none; }
 .cover .add-card-tile { border-color: rgba(255,255,255,.35); background: rgba(21,26,25,.38); }

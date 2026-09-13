@@ -43,6 +43,11 @@ const bodyGroups = computed(() => groups.value.filter(group => group.id !== cove
 const navigationGroups = computed(() => coverMode.value ? bodyGroups.value : groups.value)
 const groupLayout = computed(() => panel.value?.page?.groupLayout || 'sections')
 const tabsShowAll = computed(() => panel.value?.page?.tabsShowAll !== false)
+const surfaceStyle = computed(() => {
+  const transparency = Math.min(0.9, Math.max(0, Number(panel.value?.page?.surfaceTransparency ?? 0.28)))
+  const radius = Math.min(32, Math.max(0, Number(panel.value?.page?.surfaceRadius ?? 8)))
+  return { '--surface-opacity': 1 - transparency, '--surface-radius': `${radius}px` }
+})
 const renderedGroups = computed(() => {
   if (groupLayout.value !== 'tabs' || (tabsShowAll.value && activeGroupTab.value === '__all__')) return navigationGroups.value
   return navigationGroups.value.filter(group => group.id === activeGroupTab.value)
@@ -252,7 +257,7 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
   <main
     class="page-shell"
     :class="{ 'wallpaper-page': panel }"
-    :style="panel ? { '--wallpaper': `url(${pageBackground})`, '--overlay': panel.site.backgroundOverlay } : undefined"
+    :style="panel ? { '--wallpaper': `url(${pageBackground})`, '--overlay': panel.site.backgroundOverlay, ...surfaceStyle } : undefined"
   >
     <v-progress-linear v-if="appState.loading" indeterminate color="secondary" class="loading" />
     <CornerControls
@@ -287,7 +292,7 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
           </div>
           <p v-if="panel.page.banner.showQuote" class="banner-quote">{{ panel.page.banner.quote }}</p>
         </div>
-        <SearchBar :engines="panel.searchEngines" glass />
+        <SearchBar v-if="panel.page.searchVisible !== false" :engines="panel.searchEngines" glass />
         <div v-if="coverGroup" class="cover-groups">
           <CardGroup
             :group="coverGroup"
@@ -339,7 +344,7 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
             </div>
             <p v-if="panel.page.banner.showQuote" class="banner-quote">{{ panel.page.banner.quote }}</p>
           </div>
-          <SearchBar :engines="panel.searchEngines" />
+          <SearchBar v-if="panel.page.searchVisible !== false" :engines="panel.searchEngines" />
         </header>
         <v-tabs
           v-if="groupLayout === 'tabs' && navigationGroups.length"

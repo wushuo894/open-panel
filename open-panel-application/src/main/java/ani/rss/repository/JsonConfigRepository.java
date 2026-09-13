@@ -164,6 +164,17 @@ public class JsonConfigRepository {
             value.getSite().setThemeColor(defaults.getSite().getThemeColor());
         }
         if (value.getSchemaVersion() < 9) value.setSchemaVersion(9);
+        if (value.getSchemaVersion() < 10) {
+            value.getPage()
+                    .setSearchVisible(true)
+                    .setSurfaceTransparency(defaults.getPage().getSurfaceTransparency())
+                    .setSurfaceRadius(defaults.getPage().getSurfaceRadius());
+            value.setSchemaVersion(10);
+        }
+        double transparency = value.getPage().getSurfaceTransparency();
+        if (!Double.isFinite(transparency)) transparency = defaults.getPage().getSurfaceTransparency();
+        value.getPage().setSurfaceTransparency(Math.max(0, Math.min(0.9, transparency)));
+        value.getPage().setSurfaceRadius(Math.max(0, Math.min(32, value.getPage().getSurfaceRadius())));
     }
 
     private void normalizeServiceTypes(PanelConfig value) {
