@@ -46,3 +46,6 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+# Standalone documentation repository
+/open-panel-docs/

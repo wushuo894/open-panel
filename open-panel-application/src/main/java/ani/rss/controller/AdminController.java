@@ -3,9 +3,11 @@ package ani.rss.controller;
 import ani.rss.auth.AuthService;
 import ani.rss.entity.PanelConfig;
 import ani.rss.entity.web.AuthPayloads;
+import ani.rss.entity.web.DockerUpdateModels;
 import ani.rss.entity.web.Result;
 import ani.rss.entity.web.WebScanModels;
 import ani.rss.repository.JsonConfigRepository;
+import ani.rss.service.DockerUpdateService;
 import ani.rss.service.PanelService;
 import ani.rss.service.StatusService;
 import ani.rss.service.WebScanService;
@@ -38,16 +40,18 @@ public class AdminController {
     private final UpdateService updateService;
     private final StatusService statusService;
     private final WebScanService webScanService;
+    private final DockerUpdateService dockerUpdateService;
 
     public AdminController(PanelService panelService, JsonConfigRepository repository,
                            AuthService authService, UpdateService updateService, StatusService statusService,
-                           WebScanService webScanService) {
+                           WebScanService webScanService, DockerUpdateService dockerUpdateService) {
         this.panelService = panelService;
         this.repository = repository;
         this.authService = authService;
         this.updateService = updateService;
         this.statusService = statusService;
         this.webScanService = webScanService;
+        this.dockerUpdateService = dockerUpdateService;
     }
 
     @GetMapping("/config")
@@ -99,6 +103,45 @@ public class AdminController {
     @PostMapping("/docker/containers/action")
     public Result<Map<String, Object>> containerAction(@RequestBody Map<String, String> request) {
         return Result.ok(statusService.containerAction(request.get("containerId"), request.get("action")));
+    }
+
+    @GetMapping("/docker/containers/{id}/compose")
+    public Result<DockerUpdateModels.ComposeView> dockerCompose(
+            @org.springframework.web.bind.annotation.PathVariable String id) {
+        return Result.ok(dockerUpdateService.compose(id));
+    }
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/docker/images/unused")
+    public Result<DockerUpdateModels.ImageCleanupResult> cleanupDockerImages() {
+        return Result.ok(dockerUpdateService.cleanupUnusedImages());
+    }
+
+    @GetMapping("/docker")
+    public Result<DockerUpdateModels.DockerOverview> docker() {
+        return Result.ok(dockerUpdateService.overview());
+    }
+
+    @PostMapping("/docker/check")
+    public Result<DockerUpdateModels.DockerJob> checkDockerUpdates() {
+        return Result.ok(dockerUpdateService.startCheck());
+    }
+
+    @PostMapping("/docker/update")
+    public Result<DockerUpdateModels.DockerJob> updateDockerContainer(
+            @RequestBody DockerUpdateModels.UpdateRequest request) {
+        return Result.ok(dockerUpdateService.startUpdate(request.getContainerId()));
+    }
+
+    @GetMapping("/docker/jobs/{id}")
+    public Result<DockerUpdateModels.DockerJob> dockerJob(
+            @org.springframework.web.bind.annotation.PathVariable String id) {
+        return Result.ok(dockerUpdateService.job(id));
+    }
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/docker/jobs/{id}")
+    public Result<Void> cancelDockerJob(@org.springframework.web.bind.annotation.PathVariable String id) {
+        dockerUpdateService.cancel(id);
+        return Result.ok();
     }
 
     @PostMapping("/scan")

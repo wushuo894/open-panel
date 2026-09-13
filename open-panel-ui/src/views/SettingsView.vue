@@ -30,7 +30,21 @@ const scanForm = ref({ target: currentPageHost, range: [80, 65535] })
 const scanJob = ref(null)
 const scanGroupId = ref('')
 const selectedServices = ref([])
+const dockerOverview = ref({ available: false, error: '', containers: [], activeJob: null })
+const dockerLoading = ref(false)
+const dockerJob = ref(null)
+const dockerAutoChecked = ref(false)
+const dockerAction = ref('')
+const composeDialog = ref(false)
+const composeLoading = ref(false)
+const composeView = ref(null)
+const cleanupDialog = ref(false)
+const cleanupLoading = ref(false)
+const dockerClock = ref(Date.now())
+const dockerOverviewLoadedAt = ref(Date.now())
 let scanTimer
+let dockerTimer
+let dockerClockTimer
 
 const sortedGroups = computed(() => [...(config.value?.groups || [])]
   .sort((left, right) => (left.sort ?? 0) - (right.sort ?? 0)))
@@ -64,13 +78,28 @@ const proxiesText = computed({
 
 const scanRunning = computed(() => ['queued', 'running', 'cancelling'].includes(scanJob.value?.status))
 const scanProgress = computed(() => scanJob.value?.total ? Math.round(scanJob.value.scanned / scanJob.value.total * 100) : 0)
+const dockerJobRunning = computed(() => ['queued', 'running', 'cancelling'].includes(dockerJob.value?.status))
+const dockerUpdates = computed(() => dockerOverview.value.containers.filter(container => container.updateAvailable).length)
 
-onMounted(load)
-onBeforeUnmount(() => clearTimeout(scanTimer))
+onMounted(() => {
+  load()
+  dockerClockTimer = setInterval(() => { dockerClock.value = Date.now() }, 1000)
+})
+onBeforeUnmount(() => { clearTimeout(scanTimer); clearTimeout(dockerTimer); clearInterval(dockerClockTimer) })
 watch(tab, value => {
-  if (value !== 'about' || updateAutoChecked.value) return
-  updateAutoChecked.value = true
-  checkUpdate()
+  if (value === 'about' && !updateAutoChecked.value) {
+    updateAutoChecked.value = true
+    checkUpdate()
+  }
+  if (value === 'docker' && dockerOverview.value.available && !dockerAutoChecked.value) {
+    dockerAutoChecked.value = true
+    if (dockerOverview.value.activeJob) {
+      dockerJob.value = dockerOverview.value.activeJob
+      pollDockerJob()
+    } else {
+      startDockerCheck()
+    }
+  }
 })
 
 async function load() {
@@ -84,6 +113,7 @@ async function load() {
     usernameForm.value.newUsername = loadedConfig.security.username
     updateInfo.value = version
     scanGroupId.value = sortedGroups.value[0]?.id || ''
+    loadDockerOverview()
   }
   catch (e) { if (!getToken()) router.replace('/login'); else error.value = e.message }
   finally { loading.value = false }
@@ -278,6 +308,172 @@ async function checkUpdate() {
   finally { updateLoading.value = false }
 }
 
+async function loadDockerOverview(showLoading = true) {
+  if (showLoading) dockerLoading.value = true
+  try {
+    dockerOverview.value = await api('/api/admin/docker')
+    dockerOverviewLoadedAt.value = Date.now()
+    if (dockerOverview.value.activeJob && !dockerJobRunning.value) {
+      dockerJob.value = dockerOverview.value.activeJob
+      pollDockerJob()
+    }
+  } catch {
+    dockerOverview.value = { available: false, error: '', containers: [], activeJob: null }
+  } finally {
+    dockerLoading.value = false
+  }
+}
+
+async function startDockerCheck() {
+  clearTimeout(dockerTimer)
+  error.value = ''
+  try {
+    dockerJob.value = await api('/api/admin/docker/check', { method: 'POST' })
+    pollDockerJob()
+  } catch (e) { error.value = e.message }
+}
+
+async function startDockerUpdate(container) {
+  clearTimeout(dockerTimer)
+  error.value = ''
+  try {
+    dockerJob.value = await api('/api/admin/docker/update', {
+      method: 'POST',
+      body: JSON.stringify({ containerId: container.id })
+    })
+    pollDockerJob()
+  } catch (e) { error.value = e.message }
+}
+
+async function pollDockerJob() {
+  clearTimeout(dockerTimer)
+  if (!dockerJob.value?.id) return
+  try {
+    dockerJob.value = await api(`/api/admin/docker/jobs/${dockerJob.value.id}`)
+    if (dockerJobRunning.value) {
+      dockerTimer = setTimeout(pollDockerJob, 700)
+    } else {
+      await loadDockerOverview(false)
+      if (dockerJob.value.status === 'failed') error.value = dockerJob.value.error || 'Docker 任务失败'
+    }
+  } catch (e) { error.value = e.message }
+}
+
+async function cancelDockerJob() {
+  if (!dockerJob.value?.id || !dockerJob.value.cancellable) return
+  try {
+    await api(`/api/admin/docker/jobs/${dockerJob.value.id}`, { method: 'DELETE' })
+    pollDockerJob()
+  } catch (e) { error.value = e.message }
+}
+
+async function runDockerAction(container, action) {
+  const key = `${container.id}:${action}`
+  dockerAction.value = key
+  error.value = ''
+  try {
+    await api('/api/admin/docker/containers/action', {
+      method: 'POST',
+      body: JSON.stringify({ containerId: container.id, action })
+    })
+    await loadDockerOverview(false)
+  } catch (e) { error.value = e.message }
+  finally { dockerAction.value = '' }
+}
+
+async function showDockerCompose(container) {
+  composeDialog.value = true
+  composeLoading.value = true
+  composeView.value = null
+  try {
+    composeView.value = await api(`/api/admin/docker/containers/${encodeURIComponent(container.id)}/compose`)
+  } catch (e) {
+    error.value = e.message
+    composeDialog.value = false
+  } finally {
+    composeLoading.value = false
+  }
+}
+
+async function copyDockerCompose() {
+  const content = composeView.value?.content
+  if (!content) return
+  try {
+    await navigator.clipboard.writeText(content)
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = content
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    textarea.remove()
+  }
+  message.value = 'docker-compose.yaml 已复制'
+}
+
+async function cleanupDockerImages() {
+  cleanupLoading.value = true
+  error.value = ''
+  try {
+    const result = await api('/api/admin/docker/images/unused', { method: 'DELETE' })
+    cleanupDialog.value = false
+    message.value = result.deletedImages
+      ? `已删除 ${result.deletedImages} 个未使用镜像，释放 ${formatBytes(result.spaceReclaimed)}`
+      : '没有可删除的未使用镜像'
+    dockerJob.value = null
+    dockerAutoChecked.value = false
+    await loadDockerOverview(false)
+  } catch (e) { error.value = e.message }
+  finally { cleanupLoading.value = false }
+}
+
+function dockerStateLabel(state) {
+  return ({ running: '运行中', exited: '已停止', created: '已创建', paused: '已暂停', restarting: '重启中', dead: '异常退出' })[state] || state || '未知'
+}
+
+function formatDuration(seconds) {
+  const value = Math.max(0, Number(seconds) || 0)
+  const days = Math.floor(value / 86400)
+  const hours = Math.floor(value % 86400 / 3600)
+  const minutes = Math.floor(value % 3600 / 60)
+  if (days) return `${days}天${hours ? ` ${hours}小时` : ''}`
+  if (hours) return `${hours}小时${minutes ? ` ${minutes}分钟` : ''}`
+  if (minutes) return `${minutes}分钟`
+  return `${Math.floor(value)}秒`
+}
+
+function containerUptime(container) {
+  if (container.state !== 'running') return 0
+  return container.uptimeSeconds + Math.max(0, Math.floor((dockerClock.value - dockerOverviewLoadedAt.value) / 1000))
+}
+
+function formatBytes(bytes) {
+  const value = Math.max(0, Number(bytes) || 0)
+  if (value < 1024) return `${value} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let size = value
+  let unit = -1
+  do { size /= 1024; unit++ } while (size >= 1024 && unit < units.length - 1)
+  return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[unit]}`
+}
+
+function dockerJobTitle(job) {
+  if (!job) return ''
+  if (job.type === 'check') return job.status === 'completed' ? '镜像检查完成' : job.status === 'cancelled' ? '镜像检查已中断' : '正在检查镜像更新'
+  return job.status === 'completed' ? `${job.containerName || '容器'} 更新完成` : job.status === 'cancelled' ? '容器更新已中断' : `正在更新 ${job.containerName || '容器'}`
+}
+
+function shortImageId(value) {
+  const id = (value || '').replace(/^sha256:/, '')
+  return id ? id.slice(0, 12) : '未知'
+}
+
+function formatLogTime(timestamp) {
+  return new Date(timestamp).toLocaleTimeString('zh-CN', { hour12: false })
+}
+
 async function changePassword() {
   if (passwordForm.value.newPassword !== passwordForm.value.confirmPassword) {
     error.value = '两次输入的新密码不一致'
@@ -354,6 +550,7 @@ function logout() {
       <v-tabs v-model="tab" color="primary" class="settings-tabs" show-arrows>
         <v-tab value="appearance" prepend-icon="mdi-palette-outline">外观</v-tab>
         <v-tab value="content" prepend-icon="mdi-view-grid-outline">内容</v-tab>
+        <v-tab v-if="dockerOverview.available" value="docker" prepend-icon="mdi-docker">Docker</v-tab>
         <v-tab value="security" prepend-icon="mdi-shield-lock-outline">安全</v-tab>
         <v-tab value="data" prepend-icon="mdi-database-outline">数据</v-tab>
         <v-tab value="about" prepend-icon="mdi-information-outline">关于</v-tab>
@@ -488,6 +685,150 @@ function logout() {
                 <v-text-field v-model="engine.urlTemplate" label="搜索 URL 模板" hide-details />
                 <v-switch v-model="engine.enabled" label="启用" color="primary" hide-details />
                 <v-btn icon="mdi-delete-outline" variant="text" color="error" aria-label="删除引擎" @click="removeEngine(engine)" />
+              </div>
+            </div>
+          </section>
+        </v-window-item>
+
+        <v-window-item v-if="dockerOverview.available" value="docker">
+          <section class="settings-section">
+            <div class="section-heading">
+              <div>
+                <h2>容器镜像</h2>
+                <p>进入此页面时自动检查一次镜像更新，不会在后台定时拉取</p>
+              </div>
+              <div class="action-row">
+                <v-btn
+                  variant="outlined"
+                  prepend-icon="mdi-cloud-sync-outline"
+                  :loading="dockerJobRunning && dockerJob?.type === 'check'"
+                  :disabled="dockerJobRunning || !!dockerAction"
+                  @click="startDockerCheck"
+                >重新检测</v-btn>
+                <v-btn
+                  variant="outlined"
+                  color="error"
+                  prepend-icon="mdi-delete-sweep-outline"
+                  :disabled="dockerJobRunning || !!dockerAction"
+                  @click="cleanupDialog = true"
+                >清理镜像</v-btn>
+              </div>
+            </div>
+
+            <div class="docker-summary">
+              <span><strong>{{ dockerOverview.containers.length }}</strong><small>容器</small></span>
+              <span><strong>{{ dockerUpdates }}</strong><small>可更新</small></span>
+              <span><strong>{{ dockerOverview.containers.filter(item => item.state === 'running').length }}</strong><small>运行中</small></span>
+            </div>
+
+            <div v-if="dockerOverview.containers.length" class="docker-list">
+              <article v-for="container in dockerOverview.containers" :key="container.id" class="docker-row">
+                <span class="docker-icon"><v-icon icon="mdi-docker" size="24" /></span>
+                <div class="docker-copy">
+                  <strong>{{ container.name }}</strong>
+                  <small>{{ container.image }}</small>
+                  <small>当前镜像 {{ shortImageId(container.imageId) }}</small>
+                  <small v-if="container.state === 'running'">已运行 {{ formatDuration(containerUptime(container)) }}</small>
+                  <small v-else>{{ container.status }}</small>
+                </div>
+                <div class="docker-state">
+                  <v-chip size="small" variant="tonal" :color="container.state === 'running' ? 'success' : undefined">
+                    {{ dockerStateLabel(container.state) }}
+                  </v-chip>
+                  <v-chip v-if="container.self" size="small" variant="outlined">当前实例</v-chip>
+                  <v-chip v-else-if="container.checkError" size="small" color="error" variant="tonal">检测失败</v-chip>
+                  <v-chip v-else-if="container.updateAvailable" size="small" color="warning" variant="tonal">发现更新</v-chip>
+                  <v-chip v-else-if="container.updateChecked" size="small" color="success" variant="tonal">已是最新</v-chip>
+                  <v-chip v-else-if="!container.updatable" size="small" variant="outlined">不可更新</v-chip>
+                  <v-chip v-else size="small" variant="outlined">等待检测</v-chip>
+                </div>
+                <div class="docker-action">
+                  <small v-if="container.checkError" class="docker-error">{{ container.checkError }}</small>
+                  <small v-else-if="container.reason">{{ container.reason }}</small>
+                  <div class="docker-controls">
+                    <v-btn icon="mdi-file-code-outline" variant="text" aria-label="查看 Docker Compose" @click="showDockerCompose(container)">
+                      <v-icon icon="mdi-file-code-outline" />
+                      <v-tooltip activator="parent">查看 docker-compose.yaml</v-tooltip>
+                    </v-btn>
+                    <template v-if="!container.self">
+                      <v-btn
+                        v-if="!['running', 'paused', 'restarting'].includes(container.state)"
+                        icon="mdi-play"
+                        variant="text"
+                        color="success"
+                        aria-label="启动容器"
+                        :loading="dockerAction === `${container.id}:start`"
+                        :disabled="dockerJobRunning || !!dockerAction"
+                        @click="runDockerAction(container, 'start')"
+                      ><v-icon icon="mdi-play" /><v-tooltip activator="parent">启动</v-tooltip></v-btn>
+                      <template v-else>
+                        <v-btn
+                          icon="mdi-restart"
+                          variant="text"
+                          aria-label="重启容器"
+                          :loading="dockerAction === `${container.id}:restart`"
+                          :disabled="dockerJobRunning || !!dockerAction"
+                          @click="runDockerAction(container, 'restart')"
+                        ><v-icon icon="mdi-restart" /><v-tooltip activator="parent">重启</v-tooltip></v-btn>
+                        <v-btn
+                          icon="mdi-stop"
+                          variant="text"
+                          color="error"
+                          aria-label="停止容器"
+                          :loading="dockerAction === `${container.id}:stop`"
+                          :disabled="dockerJobRunning || !!dockerAction"
+                          @click="runDockerAction(container, 'stop')"
+                        ><v-icon icon="mdi-stop" /><v-tooltip activator="parent">停止</v-tooltip></v-btn>
+                      </template>
+                    </template>
+                    <v-btn
+                      v-if="container.updateAvailable"
+                      color="secondary"
+                      prepend-icon="mdi-update"
+                      :disabled="dockerJobRunning || !!dockerAction"
+                      @click="startDockerUpdate(container)"
+                    >一键更新</v-btn>
+                  </div>
+                </div>
+              </article>
+            </div>
+            <div v-else class="docker-empty">
+              <v-icon icon="mdi-package-variant-closed" size="32" />
+              <span>当前没有 Docker 容器</span>
+            </div>
+          </section>
+
+          <section v-if="dockerJob" class="settings-section docker-task-section">
+            <div class="docker-task-head">
+              <div>
+                <strong>{{ dockerJobTitle(dockerJob) }}</strong>
+                <small v-if="dockerJob.type === 'check' && dockerJob.totalItems">
+                  {{ dockerJob.completedItems }} / {{ dockerJob.totalItems }} 个镜像
+                </small>
+                <small v-else-if="dockerJob.image">{{ dockerJob.image }}</small>
+              </div>
+              <span>{{ dockerJob.progress }}%</span>
+              <v-btn
+                v-if="dockerJobRunning"
+                color="error"
+                variant="text"
+                prepend-icon="mdi-stop-circle-outline"
+                :disabled="!dockerJob.cancellable"
+                @click="cancelDockerJob"
+              >{{ dockerJob.cancellable ? '中断' : '正在安全替换' }}</v-btn>
+            </div>
+            <v-progress-linear
+              :model-value="dockerJob.progress"
+              :indeterminate="dockerJob.status === 'queued'"
+              :color="dockerJob.status === 'failed' ? 'error' : dockerJob.status === 'completed' ? 'success' : 'secondary'"
+              height="7"
+              rounded
+            />
+            <div class="docker-log" role="log" aria-live="polite">
+              <div v-for="(entry, index) in dockerJob.logs" :key="`${entry.timestamp}-${index}`" :class="`log-${entry.level}`">
+                <time>{{ formatLogTime(entry.timestamp) }}</time>
+                <v-icon :icon="entry.level === 'error' ? 'mdi-alert-circle-outline' : entry.level === 'success' ? 'mdi-check-circle-outline' : entry.level === 'warn' ? 'mdi-alert-outline' : 'mdi-chevron-right'" size="15" />
+                <span>{{ entry.message }}</span>
               </div>
             </div>
           </section>
@@ -638,6 +979,39 @@ function logout() {
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="composeDialog" max-width="900">
+      <v-card>
+        <v-card-title class="compose-title">
+          <span>{{ composeView?.containerName || 'Docker Compose' }}</span>
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" aria-label="关闭" @click="composeDialog = false"><v-icon icon="mdi-close" /></v-btn>
+        </v-card-title>
+        <v-card-text>
+          <v-progress-linear v-if="composeLoading" indeterminate color="secondary" />
+          <pre v-else-if="composeView" class="compose-source"><code>{{ composeView.content }}</code></pre>
+        </v-card-text>
+        <v-card-actions v-if="composeView">
+          <small class="compose-filename">{{ composeView.filename }}</small>
+          <v-spacer />
+          <v-btn prepend-icon="mdi-content-copy" variant="outlined" @click="copyDockerCompose">复制</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="cleanupDialog" max-width="480" persistent>
+      <v-card>
+        <v-card-title>清理未使用镜像</v-card-title>
+        <v-card-text>
+          将删除所有未被现存容器引用的镜像，包括更新时保留的旧 Hash 镜像。运行中和已停止容器正在使用的镜像不会被删除。
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn :disabled="cleanupLoading" @click="cleanupDialog = false">取消</v-btn>
+          <v-btn color="error" prepend-icon="mdi-delete-sweep-outline" :loading="cleanupLoading" @click="cleanupDockerImages">确认清理</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
   </main>
 </template>
 
@@ -699,6 +1073,36 @@ function logout() {
 .scan-add-row { display: grid; grid-template-columns: minmax(190px, 1fr) auto; align-items: center; gap: 12px; margin-top: 8px; }
 .password-form { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)) auto; align-items: start; gap: 10px; }
 .username-form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)) auto; align-items: start; gap: 10px; }
+.docker-summary { display: flex; gap: 28px; margin-bottom: 18px; }
+.docker-summary > span { display: grid; min-width: 72px; }
+.docker-summary strong { font-size: 1.5rem; line-height: 1.1; }
+.docker-summary small { margin-top: 5px; color: rgba(var(--v-theme-on-surface),.56); font-size: .75rem; }
+.docker-list { display: grid; gap: 9px; }
+.docker-row { display: grid; grid-template-columns: 42px minmax(220px,1.2fr) minmax(170px,.7fr) minmax(190px,.9fr); align-items: center; min-width: 0; gap: 14px; padding: 14px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgb(var(--v-theme-surface)); }
+.docker-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 8px; background: rgba(var(--v-theme-on-surface),.07); color: rgb(var(--v-theme-primary)); }
+.docker-copy { display: grid; min-width: 0; }
+.docker-copy strong, .docker-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docker-copy small, .docker-action small, .docker-task-head small { margin-top: 3px; color: rgba(var(--v-theme-on-surface),.56); font-size: .74rem; }
+.docker-state { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.docker-action { display: grid; justify-items: end; min-width: 0; gap: 5px; }
+.docker-action small { overflow: hidden; flex: 1; text-align: right; text-overflow: ellipsis; }
+.docker-action .docker-error { color: rgb(var(--v-theme-error)); }
+.docker-controls { display: flex; align-items: center; justify-content: flex-end; min-height: 40px; gap: 2px; }
+.docker-controls .v-btn--icon { width: 36px; height: 36px; }
+.docker-empty { display: grid; min-height: 180px; place-items: center; align-content: center; gap: 10px; color: rgba(var(--v-theme-on-surface),.52); }
+.docker-task-section { display: grid; gap: 14px; }
+.docker-task-head { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 14px; }
+.docker-task-head > div { display: grid; min-width: 0; }
+.docker-task-head > span { color: rgba(var(--v-theme-on-surface),.62); font-variant-numeric: tabular-nums; font-size: .82rem; }
+.docker-log { height: 260px; overflow: auto; padding: 10px 12px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgba(var(--v-theme-on-surface),.035); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .75rem; }
+.docker-log > div { display: grid; grid-template-columns: 68px 18px minmax(0,1fr); align-items: start; min-height: 25px; gap: 4px; line-height: 1.55; }
+.docker-log time { color: rgba(var(--v-theme-on-surface),.44); font-variant-numeric: tabular-nums; }
+.docker-log .log-success { color: rgb(var(--v-theme-success)); }
+.docker-log .log-warn { color: rgb(var(--v-theme-warning)); }
+.docker-log .log-error { color: rgb(var(--v-theme-error)); }
+.compose-title { display: flex; align-items: center; min-height: 58px; }
+.compose-source { max-height: min(68svh, 720px); overflow: auto; margin: 0; padding: 16px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgba(var(--v-theme-on-surface),.045); color: rgb(var(--v-theme-on-surface)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .78rem; line-height: 1.6; white-space: pre; }
+.compose-filename { padding-left: 8px; color: rgba(var(--v-theme-on-surface),.56); }
 @media (max-width: 820px) {
   .form-grid { grid-template-columns: 1fr; }
   .switch-grid { grid-template-columns: repeat(2, 1fr); }
@@ -710,6 +1114,11 @@ function logout() {
   .group-editor-head { grid-template-columns: 1fr; }
   .group-fields { grid-template-columns: 1fr; }
   .group-actions { justify-content: flex-end; }
+  .docker-row { grid-template-columns: 42px minmax(0,1fr) auto; }
+  .docker-state { grid-column: 2 / 4; }
+  .docker-action { grid-column: 2 / 4; justify-items: start; }
+  .docker-action small { text-align: left; }
+  .docker-controls { justify-content: flex-start; }
 }
 @media (max-width: 540px) {
   .settings-window { margin-inline: -12px; }
@@ -721,5 +1130,14 @@ function logout() {
   .password-form, .username-form { grid-template-columns: 1fr; }
   .scan-add-row { grid-template-columns: 1fr; }
   .scan-result { align-items: flex-start; flex-wrap: wrap; }
+  .docker-summary { justify-content: space-between; gap: 12px; }
+  .docker-row { grid-template-columns: 38px minmax(0,1fr); align-items: start; gap: 10px; }
+  .docker-icon { width: 38px; height: 38px; }
+  .docker-state, .docker-action { grid-column: 1 / 3; }
+  .docker-action { justify-items: stretch; }
+  .docker-controls { flex-wrap: wrap; }
+  .docker-task-head { grid-template-columns: minmax(0,1fr) auto; }
+  .docker-task-head .v-btn { grid-column: 1 / 3; justify-self: start; }
+  .docker-log { height: 220px; }
 }
 </style>
