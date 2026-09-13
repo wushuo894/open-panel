@@ -34,8 +34,13 @@ import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.Closeable;
+import java.net.URI;
 import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -45,6 +50,7 @@ import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -59,13 +65,25 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntConsumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class DockerUpdateService {
     private static final int MAX_JOBS = 12;
     private static final int MAX_LOGS = 300;
     private static final String SOURCE_IMAGE_LABEL = "io.github.wushuo894.open-panel.source-image";
+    private static final String MANIFEST_ACCEPT = String.join(", ",
+            "application/vnd.oci.image.index.v1+json",
+            "application/vnd.oci.image.manifest.v1+json",
+            "application/vnd.docker.distribution.manifest.list.v2+json",
+            "application/vnd.docker.distribution.manifest.v2+json");
+    private static final Pattern AUTH_PARAMETER = Pattern.compile("([a-zA-Z]+)=\\\"([^\\\"]*)\\\"");
     private final JsonConfigRepository repository;
+    private final HttpClient registryHttpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(8))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
     private final Map<String, JobState> jobs = new ConcurrentHashMap<>();
     private final Set<String> checkedImages = ConcurrentHashMap.newKeySet();
     private final Map<String, String> imageCheckErrors = new ConcurrentHashMap<>();
@@ -784,6 +802,19 @@ public class DockerUpdateService {
     }
 
     private String inspectRemoteDigest(DockerConnection connection, String image) {
+        try {
+            return inspectDockerEngineDigest(connection, image);
+        } catch (Exception engineException) {
+            try {
+                return inspectRegistryDigest(connection.config(), image);
+            } catch (Exception registryException) {
+                throw new IllegalStateException("Docker Engine 查询失败: " + conciseMessage(engineException)
+                        + "；直连镜像仓库失败: " + conciseMessage(registryException), registryException);
+            }
+        }
+    }
+
+    private String inspectDockerEngineDigest(DockerConnection connection, String image) {
         DockerClientConfig config = connection.config();
         String path = "/distribution/" + URLEncoder.encode(image, StandardCharsets.UTF_8).replace("+", "%20") + "/json";
         RemoteApiVersion apiVersion = config.getApiVersion();
@@ -818,6 +849,137 @@ public class DockerUpdateService {
         } catch (Exception exception) {
             throw new IllegalStateException("查询远端镜像摘要失败: " + safeMessage(exception), exception);
         }
+    }
+
+    private String inspectRegistryDigest(DockerClientConfig config, String image) {
+        RegistryReference reference = registryReference(image);
+        URI manifestUri = URI.create("https://" + reference.registry() + "/v2/" + reference.repository()
+                + "/manifests/" + encodePathSegment(reference.tag()));
+        HttpResponse<byte[]> response = sendManifestRequest(manifestUri, "");
+        if (response.statusCode() == 401) {
+            String challenge = response.headers().firstValue("WWW-Authenticate").orElse("");
+            String token = requestRegistryToken(config, image, reference, challenge);
+            response = sendManifestRequest(manifestUri, "Bearer " + token);
+        }
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalStateException("HTTP " + response.statusCode() + registryError(response.body()));
+        }
+        String digest = response.headers().firstValue("Docker-Content-Digest").orElse("");
+        if (!notBlank(digest)) digest = "sha256:" + sha256(response.body());
+        return digest;
+    }
+
+    private HttpResponse<byte[]> sendManifestRequest(URI uri, String authorization) {
+        HttpRequest.Builder request = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(20))
+                .header("Accept", MANIFEST_ACCEPT)
+                .header("User-Agent", "Open-Panel/1.0")
+                .GET();
+        if (notBlank(authorization)) request.header("Authorization", authorization);
+        try {
+            return registryHttpClient.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("镜像仓库请求已中断", exception);
+        } catch (Exception exception) {
+            throw new IllegalStateException(safeMessage(exception), exception);
+        }
+    }
+
+    private String requestRegistryToken(DockerClientConfig config, String image, RegistryReference reference,
+                                        String challenge) {
+        if (!challenge.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            throw new IllegalStateException("镜像仓库要求不支持的认证方式");
+        }
+        Map<String, String> parameters = new LinkedHashMap<>();
+        Matcher matcher = AUTH_PARAMETER.matcher(challenge.substring(7));
+        while (matcher.find()) parameters.put(matcher.group(1).toLowerCase(Locale.ROOT), matcher.group(2));
+        String realm = parameters.getOrDefault("realm", "");
+        if (!notBlank(realm)) throw new IllegalStateException("镜像仓库认证响应缺少 realm");
+        String scope = parameters.getOrDefault("scope", "repository:" + reference.repository() + ":pull");
+        StringBuilder tokenUrl = new StringBuilder(realm)
+                .append(realm.contains("?") ? '&' : '?');
+        String service = parameters.getOrDefault("service", "");
+        if (notBlank(service)) tokenUrl.append("service=").append(encodeQuery(service)).append('&');
+        tokenUrl.append("scope=").append(encodeQuery(scope));
+
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(tokenUrl.toString()))
+                .timeout(Duration.ofSeconds(15))
+                .header("Accept", "application/json")
+                .header("User-Agent", "Open-Panel/1.0")
+                .GET();
+        AuthConfig auth = config.effectiveAuthConfig(image);
+        if (auth != null && notBlank(auth.getUsername()) && notBlank(auth.getPassword())) {
+            String value = auth.getUsername() + ':' + auth.getPassword();
+            request.header("Authorization", "Basic " + Base64.getEncoder()
+                    .encodeToString(value.getBytes(StandardCharsets.UTF_8)));
+        }
+        try {
+            HttpResponse<byte[]> response = registryHttpClient.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IllegalStateException("认证服务返回 HTTP " + response.statusCode() + registryError(response.body()));
+            }
+            JsonNode body = config.getObjectMapper().readTree(response.body());
+            String token = body == null ? "" : body.path("token").asText("");
+            if (!notBlank(token) && body != null) token = body.path("access_token").asText("");
+            if (!notBlank(token)) throw new IllegalStateException("认证服务未返回访问令牌");
+            return token;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("镜像仓库认证已中断", exception);
+        } catch (IllegalStateException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException(safeMessage(exception), exception);
+        }
+    }
+
+    private RegistryReference registryReference(String image) {
+        ImageReference tagged = imageReference(image);
+        String repository = tagged.repository();
+        int slash = repository.indexOf('/');
+        String first = slash < 0 ? repository : repository.substring(0, slash);
+        boolean explicitRegistry = first.contains(".") || first.contains(":") || "localhost".equals(first);
+        if (!explicitRegistry) {
+            if (slash < 0) repository = "library/" + repository;
+            return new RegistryReference("registry-1.docker.io", repository, tagged.tag());
+        }
+        String registry = first;
+        repository = slash < 0 ? "" : repository.substring(slash + 1);
+        if (Set.of("docker.io", "index.docker.io", "registry-1.docker.io").contains(registry)) {
+            registry = "registry-1.docker.io";
+            if (!repository.contains("/")) repository = "library/" + repository;
+        }
+        if (!notBlank(repository)) throw new IllegalArgumentException("镜像名称缺少仓库路径");
+        return new RegistryReference(registry, repository, tagged.tag());
+    }
+
+    private String encodePathSegment(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    private String encodeQuery(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private String registryError(byte[] body) {
+        if (body == null || body.length == 0) return "";
+        String value = new String(body, StandardCharsets.UTF_8).replaceAll("\\s+", " ").strip();
+        if (value.isEmpty()) return "";
+        return ": " + value.substring(0, Math.min(value.length(), 180));
+    }
+
+    private String sha256(byte[] content) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+        } catch (Exception exception) {
+            throw new IllegalStateException("无法计算镜像摘要", exception);
+        }
+    }
+
+    private String conciseMessage(Throwable exception) {
+        String message = safeMessage(exception).replaceAll("\\s+", " ");
+        return message.substring(0, Math.min(message.length(), 180));
     }
 
     private Set<String> inspectLocalDigests(DockerClient docker, String image) {
@@ -1097,6 +1259,9 @@ public class DockerUpdateService {
         private String namedReference() {
             return repository + ':' + tag;
         }
+    }
+
+    private record RegistryReference(String registry, String repository, String tag) {
     }
 
     private record StagedImage(ImageReference reference, String previousImageId, String newImageId,
