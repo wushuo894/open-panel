@@ -11,12 +11,12 @@
         <relativePath/>
     </parent>
 
-    <groupId>ani.rss</groupId>
+    <groupId>open.panel</groupId>
     <artifactId>open-panel</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <packaging>pom</packaging>
 
-    <name>Open Panel</name>
+    <name>open-panel</name>
     <description>Self-hosted navigation and service dashboard</description>
     <url>https://github.com/wushuo894/open-panel</url>
 
@@ -57,7 +57,7 @@
     <dependencyManagement>
         <dependencies>
             <dependency>
-                <groupId>ani.rss</groupId>
+                <groupId>open.panel</groupId>
                 <artifactId>open-panel-ui</artifactId>
                 <version>${project.version}</version>
             </dependency>
