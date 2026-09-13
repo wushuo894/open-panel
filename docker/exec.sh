@@ -5,7 +5,7 @@ PANEL_UID="${PUID:-1000}"
 PANEL_GID="${PGID:-1000}"
 
 umask "${UMASK:-022}"
-mkdir -p /config
+mkdir -p /config /usr/app
 
 if [ "$(id -u)" = "0" ]; then
   addgroup -S -g "$PANEL_GID" open-panel 2>/dev/null || true
@@ -14,7 +14,7 @@ if [ "$(id -u)" = "0" ]; then
     addgroup -S -g "$DOCKER_GID" docker-host 2>/dev/null || true
     addgroup open-panel docker-host 2>/dev/null || true
   fi
-  chown -R "$PANEL_UID:$PANEL_GID" /config
+  chown -R "$PANEL_UID:$PANEL_GID" /config /usr/app
   exec su-exec "$PANEL_UID:$PANEL_GID" /run.sh
 fi
 

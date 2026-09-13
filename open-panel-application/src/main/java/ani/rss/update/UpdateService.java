@@ -15,6 +15,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.HexFormat;
@@ -58,7 +59,6 @@ public class UpdateService {
     }
 
     public Map<String, Object> install() {
-        if (container) throw new IllegalStateException("容器部署请拉取新镜像后重新创建容器");
         if (System.getProperty("os.name", "").toLowerCase().contains("win")) {
             throw new IllegalStateException("项目自更新不支持 Windows");
         }
@@ -76,8 +76,31 @@ public class UpdateService {
         Path downloaded = runningJar.resolveSibling(runningJar.getFileName() + ".new");
         download(asset.get("browser_download_url").getAsString(), downloaded);
         verify(downloaded, digest.substring(7));
-        restartAfterResponse(downloaded, runningJar);
+        if (container) {
+            replaceContainerJar(downloaded, runningJar);
+            restartContainerAfterResponse();
+        } else {
+            restartAfterResponse(downloaded, runningJar);
+        }
         return Map.of("restarting", true, "version", release.get("tag_name").getAsString());
+    }
+
+    private void replaceContainerJar(Path downloaded, Path runningJar) {
+        try {
+            Files.move(downloaded, runningJar, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
+            try {
+                Files.move(downloaded, runningJar, StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception moveException) {
+                throw new IllegalStateException("替换容器内程序失败: " + moveException.getMessage(), moveException);
+            }
+        } catch (Exception exception) {
+            throw new IllegalStateException("替换容器内程序失败: " + exception.getMessage(), exception);
+        }
+    }
+
+    private void restartContainerAfterResponse() {
+        Executors.newSingleThreadScheduledExecutor().schedule(() -> System.exit(0), 1, TimeUnit.SECONDS);
     }
 
     private JsonObject fetchRelease() {

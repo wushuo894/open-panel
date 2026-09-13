@@ -109,6 +109,7 @@ public class DockerUpdateService {
                     .withShowAll(true)
                     .exec()
                     .stream()
+                    .filter(container -> !isOpenPanelContainer(container))
                     .map(container -> containerInfo(connection.client(), container, localDigestCache))
                     .sorted(Comparator.comparing(DockerUpdateModels.ContainerInfo::getName, String.CASE_INSENSITIVE_ORDER))
                     .toList();
@@ -403,6 +404,7 @@ public class DockerUpdateService {
             List<Container> containers = docker.listContainersCmd().withShowAll(true).exec();
             Map<String, String> images = new LinkedHashMap<>();
             for (Container container : containers) {
+                if (isOpenPanelContainer(container)) continue;
                 InspectContainerResponse inspect = inspectContainer(docker, container.getId());
                 String image = resolveContainerImage(docker, container, inspect);
                 if (pullableImage(image)) images.putIfAbsent(image, container.getImageId());
@@ -1095,6 +1097,13 @@ public class DockerUpdateService {
         if (container.getNames() == null) return false;
         return Arrays.stream(container.getNames()).map(this::cleanName)
                 .anyMatch(name -> name.equalsIgnoreCase(normalized));
+    }
+
+    private boolean isOpenPanelContainer(Container container) {
+        if (isSelf(container)) return true;
+        String image = Objects.toString(container.getImage(), "");
+        String repository = imageReference(image).repository().toLowerCase(Locale.ROOT);
+        return repository.equals("wushuo894/open-panel") || repository.endsWith("/wushuo894/open-panel");
     }
 
     private Container findContainer(DockerClient docker, String requested) {

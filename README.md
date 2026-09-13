@@ -26,7 +26,7 @@ Open Panel 是一个面向家庭服务器和自托管服务的导航面板。它
 - 可选免登录只读访问；匿名用户无法进入设置
 - 单会话、公网访问限制、登录 IP 绑定、尝试次数、CORS、IP 白名单、可信反代 IP 和登录有效期
 - JSON 配置导入导出、PWA 安装与公开页面离线缓存
-- GitHub Releases 自更新，可配置 GitHub Token 避免匿名 API 请求受 IP 频率限制；容器部署提示拉取新镜像，不在容器内替换程序
+- GitHub Releases 自更新，可配置 GitHub Token 避免匿名 API 请求受 IP 频率限制；JAR 与 Docker 部署均可校验发行文件后自动替换并重启
 
 首次启动按“系统信息、Docker、常用网站”创建默认分组：系统信息包含 CPU、内存和网络卡片；检测到 Docker Socket 或 `DOCKER_HOST` 时创建 Docker 分组；常用网站包含知乎、百度贴吧、QQ 邮箱、GitHub、哔哩哔哩、YouTube、ChatGPT 和 Cloudflare。
 大封面默认不放置卡片分组，向下滚动后展示完整导航；管理员可以主动选择需要显示在封面的分组。
@@ -89,7 +89,7 @@ pnpm dev
 
 ## 更新
 
-设置页可检查 [GitHub Releases](https://github.com/wushuo894/open-panel/releases)，并可选填 GitHub Token 用于更新检查。Token 会持久化保存，但管理接口只返回脱敏值。非容器、非 Windows 的 JAR 部署可在校验发行文件 SHA-256 后自动替换并重启。Docker 部署请拉取新镜像：
+设置页可检查 [GitHub Releases](https://github.com/wushuo894/open-panel/releases)，并可选填 GitHub Token 用于更新检查。Token 会持久化保存，但管理接口只返回脱敏值。非 Windows 的 JAR 与 Docker 部署均可在校验发行文件 SHA-256 后自动替换并重启。Docker 容器由启动脚本托管 Java 进程，更新后不需要重建容器；Docker 管理页会隐藏 Open Panel 自身容器。也可以通过镜像完成完整升级：
 
 ```bash
 docker compose pull

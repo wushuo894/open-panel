@@ -557,7 +557,24 @@ async function installUpdate() {
   updateLoading.value = true
   try {
     const result = await api('/api/admin/update/install', { method: 'POST' })
-    message.value = result.restarting ? '更新已下载，服务即将重启' : '更新任务已提交'
+    if (!result.restarting) {
+      message.value = '更新任务已提交'
+      return
+    }
+    message.value = '更新已安装，正在重启服务'
+    for (let attempt = 0; attempt < 24; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 5000))
+      try {
+        const response = await fetch(appUrl('/api/public/health'), { cache: 'no-store' })
+        if (response.ok) {
+          location.reload()
+          return
+        }
+      } catch {
+        // Service is restarting.
+      }
+    }
+    throw new Error('服务重启超时，请稍后刷新页面')
   } catch (e) { error.value = e.message }
   finally { updateLoading.value = false }
 }
@@ -1021,8 +1038,7 @@ function logout() {
               <div><strong>Open Panel <span v-if="updateInfo?.currentVersion" class="version-badge">v{{ updateInfo.currentVersion }}</span></strong><small v-if="updateInfo?.latestVersion">当前 {{ updateInfo.currentVersion }} · 最新 {{ updateInfo.latestVersion }}</small><small v-else>尚未检查更新</small></div>
               <v-spacer />
               <v-btn variant="outlined" prepend-icon="mdi-refresh" :loading="updateLoading" @click="checkUpdate">检查更新</v-btn>
-              <v-btn v-if="updateInfo?.available && !updateInfo.container" color="secondary" prepend-icon="mdi-download" :loading="updateLoading" @click="installUpdate">安装更新</v-btn>
-              <v-btn v-if="updateInfo?.available && updateInfo.container" :href="updateInfo.releaseUrl" target="_blank" color="secondary" prepend-icon="mdi-docker">查看发行版</v-btn>
+              <v-btn v-if="updateInfo?.available" color="secondary" prepend-icon="mdi-download" :loading="updateLoading" @click="installUpdate">安装更新</v-btn>
             </div>
           </section>
           <section class="settings-section">
