@@ -37,6 +37,8 @@ public class ConfigBackupService {
     private static final long MAX_ASSET_SIZE = 20L * 1024 * 1024;
     private static final long MAX_EXPANDED_SIZE = 256L * 1024 * 1024;
     private static final int MAX_ENTRIES = 2048;
+    private static final Set<String> ASSET_EXTENSIONS = Set.of(
+            "avif", "png", "webp", "jpg", "jpeg", "gif", "svg", "ico");
 
     private final JsonConfigRepository repository;
     private final Path configDirectory;
@@ -134,7 +136,7 @@ public class ConfigBackupService {
                         if (assets.containsKey(filename)) throw new IllegalArgumentException("ZIP 包含重复资源: " + filename);
                         byte[] bytes = readEntry(zip, MAX_ASSET_SIZE, "ZIP 中的图片超过 20 MB");
                         expandedSize = addExpandedSize(expandedSize, bytes.length);
-                        validateImage(filename, bytes);
+                        validateImage(filename);
                         Path target = staging.resolve(filename);
                         Files.write(target, bytes);
                         assets.put(filename, target);
@@ -225,22 +227,11 @@ public class ConfigBackupService {
         }
     }
 
-    private void validateImage(String filename, byte[] bytes) {
-        String detected = detectImageExtension(bytes);
+    private void validateImage(String filename) {
         String extension = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
-        if (detected == null || !detected.equals(extension)) {
-            throw new IllegalArgumentException("ZIP 中包含无效图片: " + filename);
+        if (!ASSET_EXTENSIONS.contains(extension)) {
+            throw new IllegalArgumentException("ZIP 中包含不支持的图片格式: " + filename);
         }
-    }
-
-    private String detectImageExtension(byte[] bytes) {
-        if (startsWith(bytes, new int[]{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})) return "png";
-        if (startsWith(bytes, new int[]{0xff, 0xd8, 0xff})) return "jpg";
-        if (startsWith(bytes, "GIF87a".getBytes(StandardCharsets.US_ASCII))
-                || startsWith(bytes, "GIF89a".getBytes(StandardCharsets.US_ASCII))) return "gif";
-        if (bytes.length >= 12 && startsWith(bytes, "RIFF".getBytes(StandardCharsets.US_ASCII))
-                && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P') return "webp";
-        return null;
     }
 
     private boolean isZipSignature(byte[] bytes) {
@@ -248,22 +239,6 @@ public class ConfigBackupService {
                 && ((bytes[2] == 3 && bytes[3] == 4)
                 || (bytes[2] == 5 && bytes[3] == 6)
                 || (bytes[2] == 7 && bytes[3] == 8));
-    }
-
-    private boolean startsWith(byte[] bytes, int[] signature) {
-        if (bytes.length < signature.length) return false;
-        for (int index = 0; index < signature.length; index++) {
-            if ((bytes[index] & 0xff) != signature[index]) return false;
-        }
-        return true;
-    }
-
-    private boolean startsWith(byte[] bytes, byte[] signature) {
-        if (bytes.length < signature.length) return false;
-        for (int index = 0; index < signature.length; index++) {
-            if (bytes[index] != signature[index]) return false;
-        }
-        return true;
     }
 
     private void writeEntry(ZipOutputStream zip, String name, byte[] bytes) throws IOException {

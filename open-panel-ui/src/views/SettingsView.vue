@@ -719,10 +719,10 @@ function logout() {
               />
               <v-file-input
                 label="上传背景图片"
-                accept="image/png,image/jpeg,image/gif,image/webp"
+                accept=".avif,.png,.webp,.jpg,.jpeg,.gif"
                 prepend-icon="mdi-image-plus-outline"
                 :loading="uploadingBackground"
-                hint="PNG、JPEG、GIF 或 WebP，最大 20 MB"
+                hint="AVIF、PNG、WebP、JPG、JPEG 或 GIF，最大 20 MB"
                 persistent-hint
                 @update:model-value="uploadBackground"
               />

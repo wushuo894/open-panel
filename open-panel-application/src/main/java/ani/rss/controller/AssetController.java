@@ -23,12 +23,15 @@ import java.time.Duration;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping
 public class AssetController {
     private static final long MAX_ICON_SIZE = 2L * 1024 * 1024;
     private static final long MAX_BACKGROUND_SIZE = 20L * 1024 * 1024;
+    private static final Set<String> ICON_EXTENSIONS = Set.of("avif", "png", "webp", "jpg", "jpeg", "gif", "svg", "ico");
+    private static final Set<String> BACKGROUND_EXTENSIONS = Set.of("avif", "png", "webp", "jpg", "jpeg", "gif");
     private final Path uploadDirectory;
 
     public AssetController(@Value("${open-panel.config-dir}") String configDir) throws Exception {
@@ -41,7 +44,8 @@ public class AssetController {
         if (file.isEmpty() || file.getSize() > MAX_ICON_SIZE) {
             throw new IllegalArgumentException("图标文件为空或超过 2 MB");
         }
-        return Result.ok(Map.of("url", store(file, "icon")));
+        return Result.ok(Map.of("url", store(file, "icon", ICON_EXTENSIONS,
+                "图标仅支持 AVIF、PNG、WebP、JPG、JPEG、GIF、SVG 和 ICO")));
     }
 
     @PostMapping(value = "/api/admin/assets/background", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -49,7 +53,8 @@ public class AssetController {
         if (file.isEmpty() || file.getSize() > MAX_BACKGROUND_SIZE) {
             throw new IllegalArgumentException("背景图片为空或超过 20 MB");
         }
-        return Result.ok(Map.of("url", store(file, "background")));
+        return Result.ok(Map.of("url", store(file, "background", BACKGROUND_EXTENSIONS,
+                "背景图片仅支持 AVIF、PNG、WebP、JPG、JPEG 和 GIF")));
     }
 
     @GetMapping("/assets/uploads/{filename:[a-zA-Z0-9.-]+}")
@@ -65,21 +70,11 @@ public class AssetController {
                 .body(new FileSystemResource(file));
     }
 
-    private String detectExtension(byte[] bytes) {
-        if (startsWith(bytes, new int[]{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})) return "png";
-        if (startsWith(bytes, new int[]{0xff, 0xd8, 0xff})) return "jpg";
-        if (startsWith(bytes, "GIF87a".getBytes()) || startsWith(bytes, "GIF89a".getBytes())) return "gif";
-        if (bytes.length >= 12 && startsWith(bytes, "RIFF".getBytes())
-                && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P') return "webp";
-        return null;
-    }
-
-    private String store(MultipartFile file, String prefix) throws Exception {
+    private String store(MultipartFile file, String prefix, Set<String> allowedExtensions,
+                         String unsupportedMessage) throws Exception {
+        String extension = extension(file.getOriginalFilename());
+        if (!allowedExtensions.contains(extension)) throw new IllegalArgumentException(unsupportedMessage);
         byte[] bytes = file.getBytes();
-        String extension = detectExtension(bytes);
-        if (extension == null) {
-            throw new IllegalArgumentException("仅支持 PNG、JPEG、GIF 和 WebP 图片");
-        }
         String filename = assetFilename(file.getOriginalFilename(), prefix, extension, bytes);
         Path temporary = Files.createTempFile(uploadDirectory, prefix + "-", ".tmp");
         Files.write(temporary, bytes);
@@ -90,6 +85,14 @@ public class AssetController {
             Files.move(temporary, uploadDirectory.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
         }
         return "assets/uploads/" + filename;
+    }
+
+    private String extension(String originalFilename) {
+        if (originalFilename == null) return "";
+        String leaf = originalFilename.replace('\\', '/');
+        leaf = leaf.substring(leaf.lastIndexOf('/') + 1);
+        int index = leaf.lastIndexOf('.');
+        return index < 0 || index == leaf.length() - 1 ? "" : leaf.substring(index + 1).toLowerCase(Locale.ROOT);
     }
 
     private String assetFilename(String originalFilename, String prefix, String extension, byte[] bytes)
@@ -107,26 +110,13 @@ public class AssetController {
         return prefix + "-" + safeName + "-" + hash + "." + extension;
     }
 
-    private boolean startsWith(byte[] bytes, int[] signature) {
-        if (bytes.length < signature.length) return false;
-        for (int index = 0; index < signature.length; index++) {
-            if ((bytes[index] & 0xff) != signature[index]) return false;
-        }
-        return true;
-    }
-
-    private boolean startsWith(byte[] bytes, byte[] signature) {
-        if (bytes.length < signature.length) return false;
-        for (int index = 0; index < signature.length; index++) {
-            if (bytes[index] != signature[index]) return false;
-        }
-        return true;
-    }
-
     private MediaType mediaType(String filename) {
         if (filename.endsWith(".png")) return MediaType.IMAGE_PNG;
-        if (filename.endsWith(".jpg")) return MediaType.IMAGE_JPEG;
+        if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) return MediaType.IMAGE_JPEG;
         if (filename.endsWith(".gif")) return MediaType.IMAGE_GIF;
-        return MediaType.parseMediaType("image/webp");
+        if (filename.endsWith(".webp")) return MediaType.parseMediaType("image/webp");
+        if (filename.endsWith(".avif")) return MediaType.parseMediaType("image/avif");
+        if (filename.endsWith(".svg")) return MediaType.parseMediaType("image/svg+xml");
+        return MediaType.parseMediaType("image/x-icon");
     }
 }

@@ -286,10 +286,10 @@ async function uploadIcon(value) {
             <v-file-input
               v-else
               label="上传卡片图标"
-              accept="image/png,image/jpeg,image/gif,image/webp"
+              accept=".avif,.png,.webp,.jpg,.jpeg,.gif,.svg,.ico"
               prepend-icon="mdi-image-plus-outline"
               :loading="uploadingIcon"
-              hint="PNG、JPEG、GIF 或 WebP，最大 2 MB"
+              hint="AVIF、PNG、WebP、JPG、JPEG、GIF、SVG 或 ICO，最大 2 MB"
               persistent-hint
               @update:model-value="uploadIcon"
             />
