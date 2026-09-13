@@ -73,6 +73,7 @@ watch(() => props.modelValue, value => {
 })
 
 function normalizeCard(card) {
+  card.iconFrameless ??= false
   card.custom ||= { internalUrl: '', externalUrl: '' }
   card.system ||= { metric: 'overview', storagePath: '.' }
   card.system.storagePath ||= '.'
@@ -250,8 +251,11 @@ async function uploadIcon(value) {
 
         <section class="icon-section">
           <div class="icon-section-head">
-            <strong>图标来源</strong>
-            <span>选择一种图标设置方式</span>
+            <div>
+              <strong>图标来源</strong>
+              <span>选择一种图标设置方式</span>
+            </div>
+            <v-switch v-model="draft.iconFrameless" label="无框显示" color="primary" density="compact" hide-details />
           </div>
           <v-tabs
             :model-value="iconSource"
@@ -267,7 +271,7 @@ async function uploadIcon(value) {
             <v-tab value="upload" prepend-icon="mdi-upload-outline">本地上传</v-tab>
           </v-tabs>
           <div class="icon-editor-row">
-            <span class="icon-preview">
+            <span class="icon-preview" :class="{ frameless: draft.iconFrameless }">
               <v-icon v-if="iconSource === 'mdi' || !draft.iconUrl" :icon="iconSource === 'mdi' ? (draft.icon || 'mdi-web') : 'mdi-image-outline'" size="32" />
               <img v-else :src="appUrl(draft.iconUrl)" alt="当前卡片图标" />
             </span>
@@ -363,9 +367,11 @@ async function uploadIcon(value) {
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 4px 16px; }
 .card-option-fields { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 4px 16px; }
 .icon-section { display: grid; gap: 14px; padding: 16px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgba(var(--v-theme-on-surface),.025); }
-.icon-section-head { display: flex; align-items: baseline; gap: 10px; }
+.icon-section-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.icon-section-head > div { display: flex; align-items: baseline; gap: 10px; }
 .icon-section-head strong { font-size: .9rem; letter-spacing: 0; }
 .icon-section-head span { color: rgba(var(--v-theme-on-surface),.56); font-size: .75rem; }
+.icon-section-head :deep(.v-switch) { flex: 0 0 auto; }
 .icon-source-tabs { border-bottom: 1px solid rgba(var(--v-theme-on-surface),.1); }
 .icon-source-tabs :deep(.v-tab) { min-width: 0; padding-inline: 12px; color: rgba(var(--v-theme-on-surface),.68); font-size: .82rem; letter-spacing: 0; text-transform: none; }
 .icon-source-tabs :deep(.v-tab--selected) { color: rgb(var(--v-theme-primary)); }
@@ -373,6 +379,8 @@ async function uploadIcon(value) {
 .icon-editor-row { display: grid; grid-template-columns: 56px minmax(0,1fr); align-items: start; gap: 14px; }
 .icon-preview { display: grid; width: 56px; height: 56px; place-items: center; overflow: hidden; border: 1px solid rgba(var(--v-theme-on-surface),.12); border-radius: 8px; background: rgb(var(--v-theme-surface)); color: rgb(var(--v-theme-on-surface)); }
 .icon-preview img { width: 42px; height: 42px; object-fit: contain; }
+.icon-preview.frameless { overflow: visible; border-color: transparent; background: transparent; }
+.icon-preview.frameless img { width: 56px; height: 56px; border-radius: 22%; }
 .field-hint { margin: -8px 0 12px; color: rgba(var(--v-theme-on-surface), .62); font-size: .78rem; line-height: 1.5; }
 .link-fields-with-action { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)) auto; align-items: start; gap: 16px; }
 @media (max-width: 820px) {
@@ -385,5 +393,6 @@ async function uploadIcon(value) {
   .icon-editor-row { grid-template-columns: 44px minmax(0,1fr); gap: 10px; }
   .icon-preview { width: 44px; height: 44px; }
   .icon-preview img { width: 34px; height: 34px; }
+  .icon-preview.frameless img { width: 44px; height: 44px; }
 }
 </style>

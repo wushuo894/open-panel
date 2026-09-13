@@ -201,7 +201,7 @@ async function controlDocker(card, action) {
           @dragover.prevent.stop="previewCardDrop($event, card)"
           @drop.stop="dropOnCard(card)"
         >
-        <span class="card-icon">
+        <span class="card-icon" :class="{ frameless: card.iconFrameless }">
           <img v-if="card.iconUrl" :src="appUrl(card.iconUrl)" alt="" />
           <v-icon v-else :icon="card.icon || 'mdi-web'" size="27" />
         </span>
@@ -338,6 +338,8 @@ async function controlDocker(card, action) {
 .add-card-tile:hover { border-color: rgb(var(--v-theme-primary)); background: rgba(var(--v-theme-surface), .58); }
 .card-icon { display: grid; flex: 0 0 46px; width: 46px; height: 46px; place-items: center; overflow: hidden; border: 1px solid rgba(255,255,255,.16); border-radius: 8px; background: rgba(var(--v-theme-secondary), .68); color: #1a211d; backdrop-filter: blur(8px); }
 .card-icon img { width: 30px; height: 30px; object-fit: contain; }
+.card-icon.frameless { overflow: visible; border-color: transparent; background: transparent; color: currentColor; backdrop-filter: none; }
+.card-icon.frameless img { width: 46px; height: 46px; border-radius: 22%; }
 .card-copy { display: grid; min-width: 0; gap: 3px; }
 .card-copy strong, .card-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-copy strong { font-size: .94rem; letter-spacing: 0; }

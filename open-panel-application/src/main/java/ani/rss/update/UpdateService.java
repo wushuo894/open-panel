@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.info.BuildProperties;
 import org.springframework.boot.system.ApplicationHome;
 import org.springframework.stereotype.Service;
 
@@ -27,15 +28,18 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class UpdateService {
     private static final String RELEASE_API = "https://api.github.com/repos/wushuo894/open-panel/releases/latest";
-    private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
+    private final HttpClient client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(8))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
     private final String currentVersion;
     private final boolean container;
     private final JsonConfigRepository repository;
 
-    public UpdateService(@Value("${info.build.version:1.0.2}") String currentVersion,
+    public UpdateService(BuildProperties buildProperties,
                          @Value("${open-panel.container:false}") boolean container,
                          JsonConfigRepository repository) {
-        this.currentVersion = currentVersion;
+        this.currentVersion = buildProperties.getVersion();
         this.container = container;
         this.repository = repository;
     }
@@ -114,7 +118,8 @@ public class UpdateService {
             }
             HttpRequest request = requestBuilder.GET().build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) throw new IllegalStateException("GitHub 返回 HTTP " + response.statusCode());
+            if (response.statusCode() != 200)
+                throw new IllegalStateException("GitHub 返回 HTTP " + response.statusCode());
             return JsonParser.parseString(response.body()).getAsJsonObject();
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
@@ -129,7 +134,8 @@ public class UpdateService {
             HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofMinutes(5))
                     .header("User-Agent", "Open-Panel/" + currentVersion).GET().build();
             HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
-            if (response.statusCode() != 200) throw new IllegalStateException("下载更新失败: HTTP " + response.statusCode());
+            if (response.statusCode() != 200)
+                throw new IllegalStateException("下载更新失败: HTTP " + response.statusCode());
             try (InputStream input = response.body()) {
                 Files.copy(input, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
