@@ -46,7 +46,7 @@ docker compose up -d --build
 
 访问 `http://localhost:7788`。首次点击右上角登录按钮时会进入管理员初始化页面。
 
-运行镜像基于 `wushuo894/eclipse-temurin:26-jre-alpine`。配置保存在 `./config/open-panel.json`。如果需要 Docker 容器状态，请按 `docker-compose.yml` 中的注释挂载 `/var/run/docker.sock`，并设置宿主机 Docker 组的 `DOCKER_GID`。
+运行镜像基于 `wushuo894/eclipse-temurin:26-jre-alpine`。配置保存在 `./config/open-panel.json`，运行日志保存在 `./config/logs/open-panel.log`，按天或单文件达到 20 MB 时滚动压缩，默认保留 7 天。如果需要 Docker 容器状态，请按 `docker-compose.yml` 中的注释挂载 `/var/run/docker.sock`，并设置宿主机 Docker 组的 `DOCKER_GID`。
 
 ### 运行 JAR
 
@@ -62,6 +62,8 @@ java -jar open-panel-application/target/open-panel.jar
 ```bash
 OPEN_PANEL_CONFIG_DIR=/path/to/config java -jar open-panel.jar
 ```
+
+日志保留天数可通过 `OPEN_PANEL_LOG_MAX_HISTORY` 环境变量调整，默认值为 `7`。
 
 ### 前端开发
 

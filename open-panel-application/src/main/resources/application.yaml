@@ -16,6 +16,16 @@ server:
     enabled: true
     min-response-size: 1KB
 
+logging:
+  file:
+    name: ${OPEN_PANEL_CONFIG_DIR:./config}/logs/open-panel.log
+  logback:
+    rollingpolicy:
+      clean-history-on-start: true
+      max-file-size: 20MB
+      max-history: ${OPEN_PANEL_LOG_MAX_HISTORY:7}
+      total-size-cap: 512MB
+
 open-panel:
   config-dir: ${OPEN_PANEL_CONFIG_DIR:./config}
   container: ${OPEN_PANEL_CONTAINER:false}

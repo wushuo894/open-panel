@@ -337,7 +337,7 @@ async function loadDockerOverview(showLoading = true) {
   try {
     dockerOverview.value = await api('/api/admin/docker')
     dockerOverviewLoadedAt.value = Date.now()
-    if (dockerOverview.value.activeJob && !dockerJobRunning.value) {
+    if (dockerOverview.value.activeJob && dockerOverview.value.activeJob.id !== dockerJob.value?.id) {
       dockerJob.value = dockerOverview.value.activeJob
       pollDockerJob()
     }
@@ -789,88 +789,91 @@ function logout() {
                 v-for="container in dockerOverview.containers"
                 :key="container.id"
                 class="docker-row"
-                :class="{
-                  'docker-row--running': container.state === 'running',
-                  'docker-row--updating': containerIsUpdating(container)
-                }"
-                :style="containerIsUpdating(container) ? { '--docker-progress': `${dockerJob.progress}%` } : undefined"
+                :class="{ 'docker-row--updating': containerIsUpdating(container) }"
               >
-                <div class="docker-main">
-                  <span class="docker-icon"><v-icon icon="mdi-cube-outline" size="34" /></span>
-                  <span class="docker-health" aria-hidden="true" />
+                <div class="docker-card-head">
                   <div class="docker-copy">
                     <strong>{{ container.name }}</strong>
                     <small class="docker-image" :title="container.image">{{ container.image || '未知镜像' }}</small>
-                    <small v-if="containerIsUpdating(container)" class="docker-live-state">
-                      <v-icon icon="mdi-sync" size="18" />{{ dockerPhaseLabel(dockerJob.phase) }}
-                    </small>
-                    <small v-else-if="container.state === 'running'">运行：{{ formatDuration(containerUptime(container)) }}</small>
-                    <small v-else>{{ dockerStateLabel(container.state) }} · {{ container.status }}</small>
                   </div>
-                  <div class="docker-card-tools">
+                  <div class="docker-card-badges">
                     <v-chip v-if="container.self" size="x-small" variant="tonal">当前实例</v-chip>
                     <v-chip v-else-if="container.checkError" size="x-small" color="error" variant="tonal">检测失败</v-chip>
                     <v-chip v-else-if="!container.updatable" size="x-small" variant="tonal">不可更新</v-chip>
                     <v-chip v-else-if="container.updateAvailable" size="x-small" color="warning" variant="tonal">发现更新</v-chip>
-                    <v-btn icon="mdi-file-code-outline" size="small" variant="text" aria-label="查看 Docker Compose" @click="showDockerCompose(container)">
-                      <v-icon icon="mdi-file-code-outline" />
-                      <v-tooltip activator="parent">查看 docker-compose.yaml</v-tooltip>
-                    </v-btn>
                   </div>
                 </div>
 
-                <small v-if="container.checkError || container.reason" class="docker-note" :class="{ 'docker-error': container.checkError }">
-                  {{ container.checkError || container.reason }}
-                </small>
+                <div class="docker-card-meta" :class="{ 'docker-error': container.checkError }">
+                  <v-icon :icon="containerIsUpdating(container) ? 'mdi-sync' : container.state === 'running' ? 'mdi-clock-outline' : 'mdi-information-outline'" size="15" />
+                  <span v-if="containerIsUpdating(container)">{{ dockerPhaseLabel(dockerJob.phase) }}</span>
+                  <span v-else-if="container.state === 'running'">已运行 {{ formatDuration(containerUptime(container)) }}</span>
+                  <span v-else>{{ dockerStateLabel(container.state) }} · {{ container.status }}</span>
+                  <span v-if="container.checkError || container.reason" class="docker-note">{{ container.checkError || container.reason }}</span>
+                </div>
 
-                <div class="docker-divider" />
-
-                <v-btn
-                  v-if="containerIsUpdating(container)"
-                  class="docker-inline-progress"
-                  variant="outlined"
-                  :color="dockerJob.cancellable && dockerJob.status !== 'cancelling' ? 'error' : 'primary'"
-                  :prepend-icon="dockerJob.cancellable && dockerJob.status !== 'cancelling' ? 'mdi-stop-circle-outline' : 'mdi-sync'"
-                  :disabled="!dockerJob.cancellable || dockerJob.status === 'cancelling'"
-                  @click="cancelDockerJob"
-                >{{ dockerJob.status === 'cancelling' ? '正在停止' : dockerJob.cancellable ? '停止更新' : '正在安全替换' }} {{ dockerJob.progress }}%</v-btn>
+                <div v-if="containerIsUpdating(container)" class="docker-card-progress">
+                  <div><span>{{ dockerJob.status === 'cancelling' ? '正在停止' : dockerJob.cancellable ? '更新中' : '正在安全替换' }}</span><strong>{{ dockerJob.progress }}%</strong></div>
+                  <v-progress-linear :model-value="dockerJob.progress" color="primary" height="5" rounded />
+                  <v-btn
+                    icon="mdi-stop-circle-outline"
+                    size="small"
+                    variant="text"
+                    color="error"
+                    aria-label="停止更新"
+                    :disabled="!dockerJob.cancellable || dockerJob.status === 'cancelling'"
+                    @click="cancelDockerJob"
+                  ><v-icon icon="mdi-stop-circle-outline" /><v-tooltip activator="parent">停止更新</v-tooltip></v-btn>
+                </div>
                 <div v-else class="docker-controls">
+                  <v-btn icon="mdi-file-code-outline" size="small" variant="text" aria-label="查看 Docker Compose" @click="showDockerCompose(container)">
+                    <v-icon icon="mdi-file-code-outline" /><v-tooltip activator="parent">查看 docker-compose.yaml</v-tooltip>
+                  </v-btn>
+                  <span class="docker-control-spacer" />
                   <template v-if="!container.self">
                     <v-btn
                       v-if="containerIsActive(container)"
-                      variant="outlined"
+                      icon="mdi-stop"
+                      size="small"
+                      variant="text"
                       color="error"
-                      prepend-icon="mdi-stop"
+                      aria-label="停止容器"
                       :loading="dockerAction === `${container.id}:stop`"
                       :disabled="dockerJobRunning || !!dockerAction"
                       @click="runDockerAction(container, 'stop')"
-                    >停止</v-btn>
+                    ><v-icon icon="mdi-stop" /><v-tooltip activator="parent">停止容器</v-tooltip></v-btn>
                     <v-btn
                       v-else
-                      variant="outlined"
+                      icon="mdi-play"
+                      size="small"
+                      variant="text"
                       color="success"
-                      prepend-icon="mdi-play"
+                      aria-label="启动容器"
                       :loading="dockerAction === `${container.id}:start`"
                       :disabled="dockerJobRunning || !!dockerAction"
                       @click="runDockerAction(container, 'start')"
-                    >启动</v-btn>
+                    ><v-icon icon="mdi-play" /><v-tooltip activator="parent">启动容器</v-tooltip></v-btn>
                     <v-btn
-                      variant="outlined"
+                      icon="mdi-restart"
+                      size="small"
+                      variant="text"
                       color="primary"
-                      prepend-icon="mdi-restart"
+                      aria-label="重启容器"
                       :loading="dockerAction === `${container.id}:restart`"
                       :disabled="!containerIsActive(container) || dockerJobRunning || !!dockerAction"
                       @click="runDockerAction(container, 'restart')"
-                    >重启</v-btn>
+                    ><v-icon icon="mdi-restart" /><v-tooltip activator="parent">重启容器</v-tooltip></v-btn>
                   </template>
                   <v-btn
                     v-if="container.updatable"
-                    variant="outlined"
+                    icon="mdi-cloud-download-outline"
+                    size="small"
+                    variant="text"
                     color="secondary"
-                    prepend-icon="mdi-upload-outline"
+                    aria-label="更新容器"
                     :disabled="dockerJobRunning || !!dockerAction"
                     @click="startDockerUpdate(container)"
-                  >更新</v-btn>
+                  ><v-icon icon="mdi-cloud-download-outline" /><v-tooltip activator="parent">更新容器</v-tooltip></v-btn>
                 </div>
               </article>
             </div>
@@ -1171,34 +1174,31 @@ function logout() {
 .docker-summary > span { display: grid; min-width: 72px; }
 .docker-summary strong { font-size: 1.5rem; line-height: 1.1; }
 .docker-summary small { margin-top: 5px; color: rgba(var(--v-theme-on-surface),.56); font-size: .75rem; }
-.docker-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 390px), 1fr)); gap: 18px; }
-.docker-row { --docker-progress: 0%; position: relative; display: flex; min-width: 0; min-height: 238px; overflow: hidden; flex-direction: column; padding: 22px; border: 1px solid rgba(var(--v-theme-on-surface),.14); border-radius: 8px; background: rgb(var(--v-theme-surface)); box-shadow: 0 8px 22px rgba(15, 23, 42, .07); transition: border-color .2s ease, box-shadow .2s ease; }
-.docker-row::before { position: absolute; z-index: 0; inset: 0 auto 0 0; width: 0; background: rgba(var(--v-theme-primary),.1); content: ''; transition: width .35s ease; }
-.docker-row > * { position: relative; z-index: 1; }
-.docker-row--updating { border-color: rgba(var(--v-theme-primary),.68); box-shadow: 0 10px 26px rgba(var(--v-theme-primary),.12); }
-.docker-row--updating::before { width: var(--docker-progress); }
-.docker-main { display: grid; grid-template-columns: 64px 7px minmax(0,1fr) auto; align-items: center; min-width: 0; gap: 16px; }
-.docker-icon { display: grid; width: 64px; height: 64px; place-items: center; border-radius: 8px; background: linear-gradient(135deg, #3985f5, #9b27ed); color: #fff; box-shadow: 0 8px 16px rgba(78, 93, 230, .2); }
-.docker-health { width: 7px; height: 44px; border-radius: 4px; background: rgba(var(--v-theme-on-surface),.2); }
-.docker-row--running .docker-health { background: rgb(var(--v-theme-success)); }
-.docker-row--updating .docker-health { background: rgb(var(--v-theme-primary)); }
+.docker-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 10px; }
+.docker-row { display: flex; min-width: 0; min-height: 142px; flex-direction: column; padding: 13px 14px 10px; border: 1px solid rgba(var(--v-theme-on-surface),.11); border-radius: 8px; background: rgb(var(--v-theme-surface)); transition: border-color .18s ease, background-color .18s ease; }
+.docker-row:hover { border-color: rgba(var(--v-theme-primary),.3); }
+.docker-row--updating { border-color: rgba(var(--v-theme-primary),.52); background: rgba(var(--v-theme-primary),.035); }
+.docker-card-head { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; min-width: 0; gap: 10px; }
 .docker-copy { display: grid; min-width: 0; line-height: 1.25; }
 .docker-copy strong, .docker-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.docker-copy strong { font-size: 1.2rem; font-weight: 700; }
-.docker-copy small, .docker-task-head small { margin-top: 5px; color: rgba(var(--v-theme-on-surface),.58); font-size: .82rem; }
-.docker-image { font-size: .88rem !important; }
-.docker-live-state { display: flex; align-items: center; gap: 5px; color: rgb(var(--v-theme-primary)) !important; }
-.docker-live-state .v-icon, .docker-inline-progress:disabled .v-icon { animation: docker-spin 1.1s linear infinite; }
+.docker-copy strong { font-size: .98rem; font-weight: 700; }
+.docker-copy small, .docker-task-head small { margin-top: 3px; color: rgba(var(--v-theme-on-surface),.58); font-size: .76rem; }
+.docker-image { font-size: .8rem !important; }
 .docker-row--updating .docker-copy strong { color: rgb(var(--v-theme-primary)); }
-.docker-card-tools { display: flex; align-self: start; align-items: center; gap: 3px; }
-.docker-card-tools .v-btn { width: 36px; height: 36px; }
-.docker-note { display: block; overflow: hidden; margin-top: 12px; color: rgba(var(--v-theme-on-surface),.55); font-size: .74rem; text-overflow: ellipsis; white-space: nowrap; }
-.docker-note.docker-error { color: rgb(var(--v-theme-error)); }
-.docker-divider { height: 1px; margin-top: auto; margin-bottom: 16px; background: rgba(var(--v-theme-on-surface),.1); }
-.docker-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); min-height: 44px; gap: 8px; }
-.docker-controls .v-btn { height: 44px; min-width: 0; padding-inline: 10px; border-color: rgba(var(--v-theme-on-surface),.14); font-size: .88rem; }
-.docker-inline-progress { width: 100%; height: 44px; border-radius: 8px; font-variant-numeric: tabular-nums; }
-.docker-inline-progress:disabled { border-color: rgba(var(--v-theme-primary),.38); background: rgba(var(--v-theme-primary),.06); color: rgb(var(--v-theme-primary)); opacity: 1; }
+.docker-card-badges { display: flex; align-self: start; align-items: center; gap: 4px; }
+.docker-card-meta { display: flex; min-width: 0; align-items: center; gap: 5px; overflow: hidden; margin-top: 9px; color: rgba(var(--v-theme-on-surface),.58); font-size: .73rem; white-space: nowrap; }
+.docker-card-meta > .v-icon { flex: 0 0 auto; }
+.docker-card-meta.docker-error { color: rgb(var(--v-theme-error)); }
+.docker-note { overflow: hidden; text-overflow: ellipsis; }
+.docker-note::before { margin-inline: 2px 7px; color: rgba(var(--v-theme-on-surface),.28); content: '·'; }
+.docker-row--updating .docker-card-meta > .v-icon { color: rgb(var(--v-theme-primary)); animation: docker-spin 1.1s linear infinite; }
+.docker-card-progress { display: grid; grid-template-columns: minmax(0,1fr) 32px; align-items: center; gap: 4px 8px; margin-top: auto; padding-top: 9px; }
+.docker-card-progress > div { display: flex; justify-content: space-between; color: rgba(var(--v-theme-on-surface),.62); font-size: .72rem; font-variant-numeric: tabular-nums; }
+.docker-card-progress > .v-progress-linear { grid-column: 1; }
+.docker-card-progress > .v-btn { grid-column: 2; grid-row: 1 / 3; }
+.docker-controls { display: flex; min-height: 34px; align-items: center; gap: 1px; margin-top: auto; padding-top: 8px; border-top: 1px solid rgba(var(--v-theme-on-surface),.08); }
+.docker-control-spacer { flex: 1; }
+.docker-controls .v-btn { width: 32px; height: 32px; }
 @keyframes docker-spin { to { transform: rotate(360deg); } }
 .docker-empty { display: grid; min-height: 180px; place-items: center; align-content: center; gap: 10px; color: rgba(var(--v-theme-on-surface),.52); }
 .docker-task-section { display: grid; gap: 14px; }
@@ -1242,13 +1242,8 @@ function logout() {
   .theme-color-swatch { width: 44px; height: 44px; }
   .theme-color-control .v-btn { grid-column: 1 / -1; }
   .docker-summary { justify-content: space-between; gap: 12px; }
-  .docker-row { min-height: 222px; padding: 16px; }
-  .docker-main { grid-template-columns: 52px 6px minmax(0,1fr) auto; gap: 10px; }
-  .docker-icon { width: 52px; height: 52px; }
-  .docker-health { width: 6px; height: 38px; }
-  .docker-card-tools .v-chip { display: none; }
-  .docker-controls { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 6px; }
-  .docker-controls .v-btn { padding-inline: 6px; }
+  .docker-row { min-height: 138px; padding-inline: 12px; }
+  .docker-card-badges .v-chip { display: none; }
   .docker-task-head { grid-template-columns: minmax(0,1fr) auto; }
   .docker-task-head .v-btn { grid-column: 1 / 3; justify-self: start; }
   .docker-log { height: 220px; }

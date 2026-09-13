@@ -335,6 +335,9 @@ public class DockerUpdateService {
         JobState state = new JobState(new DockerUpdateModels.DockerJob()
                 .setId(id)
                 .setType(type)
+                .setStatus("queued")
+                .setPhase("queued")
+                .setCancellable(true)
                 .setStartedAt(System.currentTimeMillis())
                 .setLogs(new CopyOnWriteArrayList<>()));
         jobs.put(id, state);
