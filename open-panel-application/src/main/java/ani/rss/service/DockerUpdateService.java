@@ -30,6 +30,8 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
@@ -57,6 +59,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -70,6 +73,7 @@ import java.util.regex.Pattern;
 
 @Service
 public class DockerUpdateService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(DockerUpdateService.class);
     private static final int MAX_JOBS = 12;
     private static final int MAX_LOGS = 300;
     private static final String SOURCE_IMAGE_LABEL = "io.github.wushuo894.open-panel.source-image";
@@ -711,6 +715,7 @@ public class DockerUpdateService {
         DockerClient docker = connection.client();
         DockerClientConfig config = connection.config();
         AtomicReference<Throwable> failure = new AtomicReference<>();
+        CountDownLatch completed = new CountDownLatch(1);
         Map<String, long[]> layers = new ConcurrentHashMap<>();
         ResultCallback.Adapter<PullResponseItem> callback = new ResultCallback.Adapter<>() {
             @Override
@@ -731,7 +736,20 @@ public class DockerUpdateService {
             @Override
             public void onError(Throwable throwable) {
                 failure.set(throwable);
-                super.onError(throwable);
+                try {
+                    super.onError(throwable);
+                } finally {
+                    completed.countDown();
+                }
+            }
+
+            @Override
+            public void onComplete() {
+                try {
+                    super.onComplete();
+                } finally {
+                    completed.countDown();
+                }
             }
         };
         state.activeCallback = callback;
@@ -740,7 +758,7 @@ public class DockerUpdateService {
             AuthConfig auth = config.effectiveAuthConfig(image);
             if (auth != null) command.withAuthConfig(auth);
             command.exec(callback);
-            while (!callback.awaitCompletion(400, TimeUnit.MILLISECONDS)) checkCancelled(state);
+            while (!completed.await(400, TimeUnit.MILLISECONDS)) checkCancelled(state);
             checkCancelled(state);
             if (failure.get() != null) throw new IllegalStateException(safeMessage(failure.get()), failure.get());
             progress.accept(100);
@@ -1164,6 +1182,11 @@ public class DockerUpdateService {
                 .setTimestamp(System.currentTimeMillis())
                 .setLevel(level)
                 .setMessage(message));
+        switch (level) {
+            case "error" -> LOGGER.error("Docker task {}: {}", state.job.getId(), message);
+            case "warn" -> LOGGER.warn("Docker task {}: {}", state.job.getId(), message);
+            default -> LOGGER.info("Docker task {}: {}", state.job.getId(), message);
+        }
     }
 
     private synchronized void assertIdle() {
