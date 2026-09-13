@@ -155,7 +155,7 @@ public class JsonConfigRepository {
     }
 
     private void normalizeServiceTypes(PanelConfig value) {
-        java.util.Set<String> supported = java.util.Set.of("generic", "emby", "ani-rss", "qbit");
+        java.util.Set<String> supported = java.util.Set.of("generic", "emby", "ani-rss", "qbit", "openlist");
         value.getCards().stream()
                 .filter(card -> "service".equals(card.getType()) && card.getService() != null)
                 .forEach(card -> {

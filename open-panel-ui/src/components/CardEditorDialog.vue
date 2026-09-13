@@ -145,7 +145,11 @@ function changeCardType(type) {
   const previousSource = draft.value[previousType]
   const internalUrl = previousSource?.internalUrl || ''
   const externalUrl = previousSource?.externalUrl || ''
+  const title = draft.value.title
+  const remark = draft.value.remark
   applyCardTypeDefaults(type)
+  draft.value.title = title
+  draft.value.remark = remark
   const nextSource = draft.value[type]
   if (!nextSource) return
   if (!nextSource.internalUrl && internalUrl) nextSource.internalUrl = internalUrl
