@@ -679,7 +679,7 @@ function logout() {
             <div class="section-heading">
               <div>
                 <h2>容器镜像</h2>
-                <p>项目启动后自动检测一次，之后每小时检测容器镜像更新</p>
+                <p>项目启动后及每小时自动检测镜像；容器只会在手动点击更新后重建</p>
               </div>
               <div class="action-row">
                 <v-btn
@@ -765,7 +765,7 @@ function logout() {
                       </template>
                     </template>
                     <v-btn
-                      v-if="container.updateAvailable"
+                      v-if="container.updatable"
                       color="secondary"
                       prepend-icon="mdi-update"
                       :disabled="dockerJobRunning || !!dockerAction"
