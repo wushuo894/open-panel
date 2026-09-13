@@ -33,7 +33,6 @@ const selectedServices = ref([])
 const dockerOverview = ref({ available: false, error: '', containers: [], activeJob: null })
 const dockerLoading = ref(false)
 const dockerJob = ref(null)
-const dockerAutoChecked = ref(false)
 const dockerAction = ref('')
 const composeDialog = ref(false)
 const composeLoading = ref(false)
@@ -90,15 +89,6 @@ watch(tab, value => {
   if (value === 'about' && !updateAutoChecked.value) {
     updateAutoChecked.value = true
     checkUpdate()
-  }
-  if (value === 'docker' && dockerOverview.value.available && !dockerAutoChecked.value) {
-    dockerAutoChecked.value = true
-    if (dockerOverview.value.activeJob) {
-      dockerJob.value = dockerOverview.value.activeJob
-      pollDockerJob()
-    } else {
-      startDockerCheck()
-    }
   }
 })
 
@@ -423,7 +413,6 @@ async function cleanupDockerImages() {
       ? `已删除 ${result.deletedImages} 个未使用镜像，释放 ${formatBytes(result.spaceReclaimed)}`
       : '没有可删除的未使用镜像'
     dockerJob.value = null
-    dockerAutoChecked.value = false
     await loadDockerOverview(false)
   } catch (e) { error.value = e.message }
   finally { cleanupLoading.value = false }
@@ -463,11 +452,6 @@ function dockerJobTitle(job) {
   if (!job) return ''
   if (job.type === 'check') return job.status === 'completed' ? '镜像检查完成' : job.status === 'cancelled' ? '镜像检查已中断' : '正在检查镜像更新'
   return job.status === 'completed' ? `${job.containerName || '容器'} 更新完成` : job.status === 'cancelled' ? '容器更新已中断' : `正在更新 ${job.containerName || '容器'}`
-}
-
-function shortImageId(value) {
-  const id = (value || '').replace(/^sha256:/, '')
-  return id ? id.slice(0, 12) : '未知'
 }
 
 function formatLogTime(timestamp) {
@@ -695,7 +679,7 @@ function logout() {
             <div class="section-heading">
               <div>
                 <h2>容器镜像</h2>
-                <p>进入此页面时自动检查一次镜像更新，不会在后台定时拉取</p>
+                <p>项目启动后自动检测一次，之后每小时检测容器镜像更新</p>
               </div>
               <div class="action-row">
                 <v-btn
@@ -726,8 +710,7 @@ function logout() {
                 <span class="docker-icon"><v-icon icon="mdi-docker" size="24" /></span>
                 <div class="docker-copy">
                   <strong>{{ container.name }}</strong>
-                  <small>{{ container.image }}</small>
-                  <small>当前镜像 {{ shortImageId(container.imageId) }}</small>
+                  <small>当前镜像 {{ container.image || '未知' }}</small>
                   <small v-if="container.state === 'running'">已运行 {{ formatDuration(containerUptime(container)) }}</small>
                   <small v-else>{{ container.status }}</small>
                 </div>

@@ -22,6 +22,9 @@ import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
 import jakarta.annotation.PreDestroy;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -274,6 +277,24 @@ public class DockerUpdateService {
         JobState state = createJob("check");
         submit(state, () -> checkImages(state));
         return snapshot(state);
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void checkAfterStartup() {
+        startAutomaticCheck();
+    }
+
+    @Scheduled(fixedDelay = 1, initialDelay = 1, timeUnit = TimeUnit.HOURS)
+    public void checkHourly() {
+        startAutomaticCheck();
+    }
+
+    private void startAutomaticCheck() {
+        try {
+            startCheck();
+        } catch (IllegalStateException ignored) {
+            // A manual check or container update is already running; retry on the next schedule.
+        }
     }
 
     public synchronized DockerUpdateModels.DockerJob startUpdate(String containerId) {
