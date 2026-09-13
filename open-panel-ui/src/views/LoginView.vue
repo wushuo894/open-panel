@@ -8,7 +8,7 @@ import { appState, loadAuth } from '../stores/app'
 const router = useRouter()
 const REMEMBERED_LOGIN_KEY = 'open-panel-remembered-login'
 const rememberedLogin = loadRememberedLogin()
-const form = ref({ username: rememberedLogin.username || 'admin', password: rememberedLogin.password || '' })
+const form = ref({ username: rememberedLogin.username || '', password: rememberedLogin.password || '' })
 const rememberPassword = ref(Boolean(rememberedLogin.password))
 const loading = ref(false)
 const error = ref('')
