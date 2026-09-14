@@ -21,6 +21,8 @@ const saving = ref(false)
 const editConfig = ref(null)
 const editorOpen = ref(false)
 const editorCard = ref(null)
+const quickEditConfig = ref(null)
+const quickEditLoading = ref(false)
 const originalGroupId = ref('')
 const draggedCardId = ref('')
 const activeGroupTab = ref('__all__')
@@ -29,6 +31,8 @@ const notice = ref('')
 const editError = ref('')
 let clockTimer
 let wallpaperTimer
+let quickEditConfigRequest = null
+let editorLoadGeneration = 0
 
 const panel = computed(() => editing.value ? editConfig.value : appState.panel)
 const coverMode = computed(() => panel.value?.page?.mode === 'cover')
@@ -78,14 +82,35 @@ function uuid() {
   return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10).join('')}`
 }
 
+function fetchQuickEditConfig() {
+  if (quickEditConfig.value) return Promise.resolve(quickEditConfig.value)
+  if (quickEditConfigRequest) return quickEditConfigRequest
+  const request = api('/api/admin/config')
+    .then(config => {
+      quickEditConfig.value = config
+      return config
+    })
+    .finally(() => {
+      if (quickEditConfigRequest === request) quickEditConfigRequest = null
+    })
+  quickEditConfigRequest = request
+  return request
+}
+
+function preloadQuickEditConfig() {
+  fetchQuickEditConfig().catch(() => {})
+}
+
 async function startEditing() {
   editLoading.value = true
   editError.value = ''
   try {
     editConfig.value = await api('/api/admin/config')
     editing.value = true
+    return true
   } catch (error) {
     editError.value = error.message
+    return false
   } finally {
     editLoading.value = false
   }
@@ -95,6 +120,7 @@ function cancelEditing() {
   editing.value = false
   editConfig.value = null
   editorOpen.value = false
+  quickEditConfig.value = null
   pendingRemoval.value = null
   draggedCardId.value = ''
 }
@@ -105,6 +131,7 @@ async function saveEditing() {
   try {
     normalizeAllCardSort()
     await api('/api/admin/config', { method: 'PUT', body: JSON.stringify(editConfig.value) })
+    quickEditConfig.value = JSON.parse(JSON.stringify(editConfig.value))
     editing.value = false
     editConfig.value = null
     await loadPanel()
@@ -118,10 +145,16 @@ async function saveEditing() {
 }
 
 function newCard(groupId) {
+  editorLoadGeneration++
+  quickEditLoading.value = false
+  if (!editing.value) preloadQuickEditConfig()
+  const targetCards = editing.value
+    ? editConfig.value.cards
+    : quickEditConfig.value?.cards || appState.panel?.cards || []
   originalGroupId.value = ''
   editorCard.value = {
     id: uuid(), groupId, type: 'custom', title: '新卡片', remark: '', icon: 'mdi-web', iconUrl: '', iconFrameless: false, enabled: true,
-    sort: cardsFor({ id: groupId }).length, openTarget: 'new',
+    sort: targetCards.filter(card => card.groupId === groupId).length, openTarget: 'new',
     custom: { internalUrl: '', externalUrl: '' },
     system: { metric: 'overview', storagePath: '.' },
     service: { serviceType: 'generic', internalUrl: '', externalUrl: '', statusUrl: '', token: '' },
@@ -131,12 +164,62 @@ function newCard(groupId) {
 }
 
 function editCard(card) {
+  const generation = ++editorLoadGeneration
+  const cachedCard = !editing.value
+    ? quickEditConfig.value?.cards.find(item => item.id === card.id)
+    : null
+  if (cachedCard) card = cachedCard
   originalGroupId.value = card.groupId
   editorCard.value = JSON.parse(JSON.stringify(card))
   editorOpen.value = true
+  if (editing.value || cachedCard) {
+    quickEditLoading.value = false
+    return
+  }
+  quickEditLoading.value = true
+  fetchQuickEditConfig()
+    .then(config => {
+      if (generation !== editorLoadGeneration || !editorOpen.value) return
+      const adminCard = config.cards.find(item => item.id === card.id)
+      if (adminCard) editorCard.value = JSON.parse(JSON.stringify(adminCard))
+    })
+    .catch(error => {
+      if (generation !== editorLoadGeneration) return
+      editorOpen.value = false
+      editError.value = error.message
+    })
+    .finally(() => {
+      if (generation === editorLoadGeneration) quickEditLoading.value = false
+    })
 }
 
-function commitCard(card) {
+async function commitCard(card) {
+  if (!editing.value) {
+    saving.value = true
+    editError.value = ''
+    try {
+      const config = await fetchQuickEditConfig()
+      const cards = config.cards
+      const index = cards.findIndex(item => item.id === card.id)
+      if (originalGroupId.value && originalGroupId.value !== card.groupId) {
+        card.sort = cards.filter(item => item.groupId === card.groupId && item.id !== card.id).length
+      }
+      if (index >= 0) cards.splice(index, 1, card)
+      else cards.push(card)
+      normalizeConfigCardSort(config, originalGroupId.value)
+      normalizeConfigCardSort(config, card.groupId)
+      await api('/api/admin/config', { method: 'PUT', body: JSON.stringify(config) })
+      quickEditConfig.value = config
+      await loadPanel()
+      loadStatuses()
+      notice.value = '卡片已保存'
+    } catch (error) {
+      editError.value = error.message
+    } finally {
+      saving.value = false
+    }
+    return
+  }
   const cards = editConfig.value.cards
   const index = cards.findIndex(item => item.id === card.id)
   if (originalGroupId.value && originalGroupId.value !== card.groupId) {
@@ -150,12 +233,36 @@ function commitCard(card) {
 }
 
 function requestRemoveCard(card) {
+  if (!editing.value) {
+    preloadQuickEditConfig()
+    card = quickEditConfig.value?.cards.find(item => item.id === card.id) || card
+  }
   pendingRemoval.value = card
 }
 
-function removeCard() {
+async function removeCard() {
   const card = pendingRemoval.value
   if (!card) return
+  if (!editing.value) {
+    saving.value = true
+    editError.value = ''
+    try {
+      const config = await fetchQuickEditConfig()
+      config.cards = config.cards.filter(item => item.id !== card.id)
+      normalizeConfigCardSort(config, card.groupId)
+      pendingRemoval.value = null
+      await api('/api/admin/config', { method: 'PUT', body: JSON.stringify(config) })
+      quickEditConfig.value = config
+      await loadPanel()
+      loadStatuses()
+      notice.value = '卡片已删除'
+    } catch (error) {
+      editError.value = error.message
+    } finally {
+      saving.value = false
+    }
+    return
+  }
   editConfig.value.cards = editConfig.value.cards.filter(item => item.id !== card.id)
   normalizeCardSort(card.groupId)
   pendingRemoval.value = null
@@ -163,6 +270,14 @@ function removeCard() {
 
 function normalizeCardSort(groupId) {
   cardsFor({ id: groupId }).forEach((card, index) => { card.sort = index })
+}
+
+function normalizeConfigCardSort(config, groupId) {
+  if (!groupId) return
+  config.cards
+    .filter(card => card.groupId === groupId)
+    .sort((left, right) => (left.sort ?? 0) - (right.sort ?? 0))
+    .forEach((card, index) => { card.sort = index })
 }
 
 function normalizeAllCardSort() {
@@ -234,6 +349,7 @@ onMounted(async () => {
     const auth = await loadAuth()
     if (!auth.anonymousAccess && !auth.authenticated) return router.replace('/login')
     await loadPanel()
+    if (auth.authenticated) preloadQuickEditConfig()
     applyTheme()
     startWallpaperRotation()
     loadStatuses()
@@ -250,7 +366,10 @@ watch([navigationGroups, tabsShowAll], ([value, showAll]) => {
     activeGroupTab.value = value[0]?.id || ''
   }
 }, { immediate: true })
-onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer) })
+onBeforeUnmount(() => {
+  clearInterval(clockTimer)
+  clearInterval(wallpaperTimer)
+})
 </script>
 
 <template>
@@ -395,7 +514,7 @@ onBeforeUnmount(() => { clearInterval(clockTimer); clearInterval(wallpaperTimer)
       <v-btn color="secondary" @click="loadPanel">重试</v-btn>
     </div>
 
-    <CardEditorDialog v-model="editorOpen" :card="editorCard" :groups="groups" @save="commitCard" />
+    <CardEditorDialog v-model="editorOpen" :card="editorCard" :groups="groups" :loading="quickEditLoading" @save="commitCard" />
 
     <v-dialog :model-value="Boolean(pendingRemoval)" max-width="420" @update:model-value="value => { if (!value) pendingRemoval = null }">
       <v-card>

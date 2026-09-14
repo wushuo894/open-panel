@@ -52,4 +52,5 @@ public class PublicController {
     public Result<Map<String, Object>> dockerStatus() {
         return Result.ok(statusService.dockerStatuses());
     }
+
 }

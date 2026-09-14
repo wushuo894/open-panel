@@ -7,7 +7,8 @@ import MdiIconPicker from './MdiIconPicker.vue'
 const props = defineProps({
   modelValue: Boolean,
   card: Object,
-  groups: Array
+  groups: Array,
+  loading: Boolean
 })
 const emit = defineEmits(['update:modelValue', 'save'])
 
@@ -69,7 +70,7 @@ watch(() => props.card, value => {
 }, { immediate: true })
 
 watch(() => props.modelValue, value => {
-  if (value) loadDockerContainers()
+  if (value && draft.value?.type === 'docker') loadDockerContainers()
 })
 
 function normalizeCard(card) {
@@ -235,9 +236,9 @@ async function uploadIcon(value) {
 
 <template>
   <v-dialog :model-value="modelValue" max-width="720" scrollable persistent @update:model-value="value => emit('update:modelValue', value)">
-    <v-card v-if="draft">
+    <v-card v-if="draft" :loading="loading">
       <v-card-title>卡片设置</v-card-title>
-      <v-card-text class="dialog-form">
+      <v-card-text class="dialog-form" :class="{ 'dialog-form--loading': loading }" :inert="loading || undefined">
         <v-alert v-if="error" type="error" variant="tonal" density="compact" closable @click:close="error = ''">{{ error }}</v-alert>
         <div class="card-option-fields">
           <v-select v-model="draft.groupId" label="所属分组" :items="groups" item-title="title" item-value="id" />
@@ -356,7 +357,7 @@ async function uploadIcon(value) {
       <v-card-actions>
         <v-spacer />
         <v-btn @click="close">取消</v-btn>
-        <v-btn color="secondary" @click="submit">确定</v-btn>
+        <v-btn color="secondary" :disabled="loading" @click="submit">确定</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -364,6 +365,7 @@ async function uploadIcon(value) {
 
 <style scoped>
 .dialog-form { display: grid; gap: 4px; padding-top: 20px !important; }
+.dialog-form--loading { opacity: .62; pointer-events: none; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 4px 16px; }
 .card-option-fields { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 4px 16px; }
 .icon-section { display: grid; gap: 14px; padding: 16px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgba(var(--v-theme-on-surface),.025); }

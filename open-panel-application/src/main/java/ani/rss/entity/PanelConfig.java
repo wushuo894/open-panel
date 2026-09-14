@@ -50,7 +50,7 @@ public class PanelConfig implements Serializable {
     public static class Banner implements Serializable {
         private boolean visible = true;
         private boolean showTime = true;
-        private boolean showSeconds;
+        private boolean showSeconds = true;
         private boolean showDate = true;
         private boolean showWeekday = true;
         private boolean showTitle = true;
