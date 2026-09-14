@@ -58,7 +58,14 @@ public final class DockerUpdateModels {
     @Accessors(chain = true)
     public static class ImageCleanupResult implements Serializable {
         private int deletedImages;
+        private int skippedImages;
         private long spaceReclaimed;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class ImageCleanupRequest implements Serializable {
+        private List<String> imageIds = new ArrayList<>();
     }
 
     @Data

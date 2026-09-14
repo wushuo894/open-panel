@@ -45,6 +45,7 @@ const cleanupDialog = ref(false)
 const cleanupLoading = ref(false)
 const cleanupPreviewLoading = ref(false)
 const cleanupPreview = ref(null)
+const cleanupSelectedImageIds = ref([])
 const dockerClock = ref(Date.now())
 const dockerOverviewLoadedAt = ref(Date.now())
 const predefinedThemeColors = [
@@ -93,6 +94,19 @@ const dockerJobRunning = computed(() => ['queued', 'running', 'cancelling'].incl
 const dockerUpdates = computed(() => dockerOverview.value.containers.filter(container => container.updateAvailable).length)
 const sortedDockerContainers = computed(() => [...dockerOverview.value.containers]
   .sort((left, right) => Number(Boolean(right.updateAvailable)) - Number(Boolean(left.updateAvailable))))
+const cleanupSelectedImages = computed(() => {
+  const selected = new Set(cleanupSelectedImageIds.value)
+  return (cleanupPreview.value?.images || []).filter(image => selected.has(image.id))
+})
+const cleanupSelectedSize = computed(() => cleanupSelectedImages.value.reduce((total, image) => total + image.size, 0))
+const cleanupAllSelected = computed({
+  get: () => Boolean(cleanupPreview.value?.images?.length)
+    && cleanupSelectedImageIds.value.length === cleanupPreview.value.images.length,
+  set: selected => {
+    cleanupSelectedImageIds.value = selected ? cleanupPreview.value?.images?.map(image => image.id) || [] : []
+  }
+})
+const cleanupSelectionIndeterminate = computed(() => cleanupSelectedImageIds.value.length > 0 && !cleanupAllSelected.value)
 
 onMounted(() => {
   load()
@@ -447,14 +461,18 @@ async function copyDockerCompose() {
 }
 
 async function cleanupDockerImages() {
+  if (!cleanupSelectedImageIds.value.length) return
   cleanupLoading.value = true
   error.value = ''
   try {
-    const result = await api('/api/admin/docker/images/unused', { method: 'DELETE' })
+    const result = await api('/api/admin/docker/images/unused', {
+      method: 'DELETE',
+      body: JSON.stringify({ imageIds: cleanupSelectedImageIds.value })
+    })
     cleanupDialog.value = false
     message.value = result.deletedImages
-      ? `已删除 ${result.deletedImages} 个未使用镜像，释放 ${formatBytes(result.spaceReclaimed)}`
-      : '没有可删除的未使用镜像'
+      ? `已删除 ${result.deletedImages} 个未使用镜像，释放约 ${formatBytes(result.spaceReclaimed)}${result.skippedImages ? `，${result.skippedImages} 个镜像已跳过` : ''}`
+      : result.skippedImages ? `${result.skippedImages} 个镜像已被使用或无法删除` : '没有可删除的未使用镜像'
     dockerJob.value = null
     await loadDockerOverview(false)
   } catch (e) { error.value = e.message }
@@ -465,9 +483,11 @@ async function openCleanupDialog() {
   cleanupDialog.value = true
   cleanupPreviewLoading.value = true
   cleanupPreview.value = null
+  cleanupSelectedImageIds.value = []
   error.value = ''
   try {
     cleanupPreview.value = await api('/api/admin/docker/images/unused')
+    cleanupSelectedImageIds.value = cleanupPreview.value.images.map(image => image.id)
   } catch (e) {
     error.value = e.message
     cleanupDialog.value = false
@@ -1148,11 +1168,25 @@ function logout() {
           <v-progress-linear v-if="cleanupPreviewLoading" indeterminate color="secondary" />
           <template v-else-if="cleanupPreview">
             <div v-if="cleanupPreview.images.length" class="cleanup-summary">
-              <strong>将清理 {{ cleanupPreview.images.length }} 个镜像</strong>
-              <small>镜像大小合计 {{ formatBytes(cleanupPreview.totalSize) }}</small>
+              <v-checkbox-btn
+                v-model="cleanupAllSelected"
+                label="全选"
+                color="primary"
+                :indeterminate="cleanupSelectionIndeterminate"
+                :disabled="cleanupLoading"
+              />
+              <strong>已选 {{ cleanupSelectedImages.length }} / {{ cleanupPreview.images.length }}</strong>
+              <small>合计 {{ formatBytes(cleanupSelectedSize) }}</small>
             </div>
             <div v-if="cleanupPreview.images.length" class="cleanup-image-list">
               <div v-for="image in cleanupPreview.images" :key="image.id" class="cleanup-image-row">
+                <v-checkbox-btn
+                  v-model="cleanupSelectedImageIds"
+                  :value="image.id"
+                  color="primary"
+                  :disabled="cleanupLoading"
+                  :aria-label="`选择镜像 ${cleanupImageName(image)}`"
+                />
                 <v-icon icon="mdi-package-variant" size="22" />
                 <span>
                   <strong :title="image.references?.join('\n')">{{ cleanupImageName(image) }}</strong>
@@ -1173,9 +1207,9 @@ function logout() {
             color="error"
             prepend-icon="mdi-delete-sweep-outline"
             :loading="cleanupLoading"
-            :disabled="cleanupPreviewLoading || !cleanupPreview?.images?.length"
+            :disabled="cleanupPreviewLoading || !cleanupSelectedImageIds.length"
             @click="cleanupDockerImages"
-          >确认清理</v-btn>
+          >确认清理（{{ cleanupSelectedImageIds.length }}）</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -1298,10 +1332,12 @@ function logout() {
 .compose-source { max-height: min(68svh, 720px); overflow: auto; margin: 0; padding: 16px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgba(var(--v-theme-on-surface),.045); color: rgb(var(--v-theme-on-surface)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .78rem; line-height: 1.6; white-space: pre; }
 .compose-filename { padding-left: 8px; color: rgba(var(--v-theme-on-surface),.56); }
 .cleanup-dialog-content { display: grid; min-height: 150px; gap: 14px; }
-.cleanup-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+.cleanup-summary { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 14px; }
+.cleanup-summary strong { font-size: .86rem; }
 .cleanup-summary small { color: rgba(var(--v-theme-on-surface),.58); font-size: .76rem; }
 .cleanup-image-list { display: grid; max-height: min(52svh, 480px); gap: 2px; overflow-y: auto; }
 .cleanup-image-row { display: flex; align-items: center; min-width: 0; gap: 11px; padding: 10px 8px; border-bottom: 1px solid rgba(var(--v-theme-on-surface),.08); }
+.cleanup-image-row > .v-selection-control { flex: 0 0 auto; }
 .cleanup-image-row > .v-icon { flex: 0 0 auto; color: rgba(var(--v-theme-on-surface),.6); }
 .cleanup-image-row > span { display: grid; min-width: 0; gap: 3px; }
 .cleanup-image-row strong, .cleanup-image-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

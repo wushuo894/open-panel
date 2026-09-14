@@ -18,7 +18,6 @@ import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.Image;
 import com.github.dockerjava.api.model.PullResponseItem;
-import com.github.dockerjava.api.model.PruneType;
 import com.github.dockerjava.api.model.Volume;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientConfig;
@@ -138,19 +137,40 @@ public class DockerUpdateService {
     }
 
     public synchronized DockerUpdateModels.ImageCleanupResult cleanupUnusedImages() {
+        return cleanupUnusedImages(null);
+    }
+
+    public synchronized DockerUpdateModels.ImageCleanupResult cleanupUnusedImages(List<String> imageIds) {
         assertIdle();
+        Set<String> requestedIds = imageIds == null ? null : imageIds.stream()
+                .filter(this::notBlank)
+                .map(this::normalizeImageId)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        if (requestedIds != null && requestedIds.isEmpty()) throw new IllegalArgumentException("请至少选择一个待清理镜像");
         try (DockerConnection connection = connect(Duration.ofMinutes(5))) {
             DockerClient docker = connection.client();
-            int before = docker.listImagesCmd().withShowAll(true).exec().size();
-            var result = docker.pruneCmd(PruneType.IMAGES).withDangling(false).exec();
-            int after = docker.listImagesCmd().withShowAll(true).exec().size();
-            stagedImages.clear();
-            checkedImages.clear();
-            imageCheckErrors.clear();
-            remoteImageDigests.clear();
+            List<Image> unusedImages = unusedImages(docker);
+            List<Image> targets = requestedIds == null ? unusedImages : unusedImages.stream()
+                    .filter(image -> requestedIds.contains(normalizeImageId(image.getId())))
+                    .toList();
+            int skippedImages = requestedIds == null ? 0 : requestedIds.size() - targets.size();
+            int deletedImages = 0;
+            long spaceReclaimed = 0;
+            for (Image image : targets) {
+                try {
+                    docker.removeImageCmd(image.getId()).withForce(true).withNoPrune(true).exec();
+                    deletedImages++;
+                    spaceReclaimed += image.getSize() == null ? 0 : image.getSize();
+                } catch (Exception | LinkageError exception) {
+                    skippedImages++;
+                    LOGGER.warn("删除未使用镜像 {} 失败: {}", shortId(image.getId()), safeMessage(exception));
+                }
+            }
+            if (deletedImages > 0) clearImageUpdateCache();
             return new DockerUpdateModels.ImageCleanupResult()
-                    .setDeletedImages(Math.max(0, before - after))
-                    .setSpaceReclaimed(result.getSpaceReclaimed() == null ? 0 : result.getSpaceReclaimed());
+                    .setDeletedImages(deletedImages)
+                    .setSkippedImages(skippedImages)
+                    .setSpaceReclaimed(spaceReclaimed);
         } catch (Exception | LinkageError exception) {
             throw new IllegalStateException("清理未使用镜像失败: " + safeMessage(exception), exception);
         }
@@ -160,13 +180,7 @@ public class DockerUpdateService {
         assertIdle();
         try (DockerConnection connection = connect(Duration.ofSeconds(12))) {
             DockerClient docker = connection.client();
-            Set<String> usedImageIds = docker.listContainersCmd().withShowAll(true).exec().stream()
-                    .map(Container::getImageId)
-                    .filter(Objects::nonNull)
-                    .map(this::normalizeImageId)
-                    .collect(java.util.stream.Collectors.toSet());
-            List<DockerUpdateModels.UnusedImage> images = docker.listImagesCmd().withShowAll(true).exec().stream()
-                    .filter(image -> !usedImageIds.contains(normalizeImageId(image.getId())))
+            List<DockerUpdateModels.UnusedImage> images = unusedImages(docker).stream()
                     .map(this::unusedImage)
                     .sorted(Comparator.comparing(image -> image.getReferences().isEmpty()
                             ? image.getId() : image.getReferences().getFirst(), String.CASE_INSENSITIVE_ORDER))
@@ -176,6 +190,24 @@ public class DockerUpdateService {
         } catch (Exception | LinkageError exception) {
             throw new IllegalStateException("读取待清理镜像失败: " + safeMessage(exception), exception);
         }
+    }
+
+    private List<Image> unusedImages(DockerClient docker) {
+        Set<String> usedImageIds = docker.listContainersCmd().withShowAll(true).exec().stream()
+                .map(Container::getImageId)
+                .filter(Objects::nonNull)
+                .map(this::normalizeImageId)
+                .collect(java.util.stream.Collectors.toSet());
+        return docker.listImagesCmd().withShowAll(true).exec().stream()
+                .filter(image -> !usedImageIds.contains(normalizeImageId(image.getId())))
+                .toList();
+    }
+
+    private void clearImageUpdateCache() {
+        stagedImages.clear();
+        checkedImages.clear();
+        imageCheckErrors.clear();
+        remoteImageDigests.clear();
     }
 
     private DockerUpdateModels.UnusedImage unusedImage(Image image) {

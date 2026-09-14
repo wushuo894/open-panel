@@ -108,8 +108,11 @@ public class AdminController {
     }
 
     @org.springframework.web.bind.annotation.DeleteMapping("/docker/images/unused")
-    public Result<DockerUpdateModels.ImageCleanupResult> cleanupDockerImages() {
-        return Result.ok(dockerUpdateService.cleanupUnusedImages());
+    public Result<DockerUpdateModels.ImageCleanupResult> cleanupDockerImages(
+            @RequestBody(required = false) DockerUpdateModels.ImageCleanupRequest request) {
+        return Result.ok(request == null
+                ? dockerUpdateService.cleanupUnusedImages()
+                : dockerUpdateService.cleanupUnusedImages(request.getImageIds()));
     }
 
     @GetMapping("/docker/images/unused")
