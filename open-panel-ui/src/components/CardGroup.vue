@@ -336,7 +336,9 @@ async function controlDocker(card, action) {
 .icon-grid .add-card-tile span { display: none; }
 .cover .add-card-tile { border-color: rgba(255,255,255,.35); background: rgba(21,26,25,.38); }
 .add-card-tile:hover { border-color: rgb(var(--v-theme-primary)); background: rgba(var(--v-theme-surface), .58); }
-.card-icon { display: grid; flex: 0 0 46px; width: 46px; height: 46px; place-items: center; overflow: hidden; border: 1px solid rgba(255,255,255,.16); border-radius: 8px; background: rgba(var(--v-theme-secondary), .68); color: #1a211d; backdrop-filter: blur(8px); }
+.card-icon { display: grid; flex: 0 0 46px; width: 46px; height: 46px; place-items: center; overflow: hidden; border: 1px solid rgba(255,255,255,.42); border-radius: 8px; background: rgba(255,255,255,.72); color: #1a211d; backdrop-filter: blur(8px); }
+:global(.v-theme--dark) .card-icon { border-color: rgba(255,255,255,.12); background: rgba(255,255,255,.14); color: #f4f7f5; }
+.cover .card-icon { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.72); color: #1a211d; }
 .card-icon img { width: 30px; height: 30px; object-fit: contain; }
 .card-icon.frameless { overflow: visible; border-color: transparent; background: transparent; color: currentColor; backdrop-filter: none; }
 .card-icon.frameless img { width: 46px; height: 46px; border-radius: 22%; }
