@@ -358,7 +358,7 @@ async function checkUpdate() {
 async function loadDockerOverview(showLoading = true) {
   if (showLoading) dockerLoading.value = true
   try {
-    dockerOverview.value = await api('/api/admin/docker')
+    dockerOverview.value = await api('/api/admin/docker', { cache: 'no-store' })
     dockerOverviewLoadedAt.value = Date.now()
     if (dockerOverview.value.activeJob && dockerOverview.value.activeJob.id !== dockerJob.value?.id) {
       dockerJob.value = dockerOverview.value.activeJob
@@ -400,7 +400,9 @@ async function pollDockerJob() {
     if (dockerJobRunning.value) {
       dockerTimer = setTimeout(pollDockerJob, 700)
     } else {
+      const completedCheck = dockerJob.value.type === 'check' && dockerJob.value.status === 'completed'
       await loadDockerOverview(false)
+      if (completedCheck) message.value = '镜像检测完成，容器列表已刷新'
       if (dockerJob.value.status === 'failed') error.value = dockerJob.value.error || 'Docker 任务失败'
     }
   } catch (e) { error.value = e.message }
@@ -837,7 +839,7 @@ function logout() {
             <div class="section-heading">
               <div>
                 <h2>容器镜像</h2>
-                <p>项目启动后及每小时自动检测镜像；容器只会在手动点击更新后重建</p>
+                <p>项目启动后及每 3 小时自动检测镜像；容器只会在手动点击更新后重建</p>
               </div>
               <div class="action-row">
                 <v-btn

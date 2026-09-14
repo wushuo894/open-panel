@@ -9,16 +9,7 @@ import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.command.InspectImageResponse;
-import com.github.dockerjava.api.model.AccessMode;
-import com.github.dockerjava.api.model.AuthConfig;
-import com.github.dockerjava.api.model.Bind;
-import com.github.dockerjava.api.model.Container;
-import com.github.dockerjava.api.model.ContainerConfig;
-import com.github.dockerjava.api.model.ContainerNetwork;
-import com.github.dockerjava.api.model.HostConfig;
-import com.github.dockerjava.api.model.Image;
-import com.github.dockerjava.api.model.PullResponseItem;
-import com.github.dockerjava.api.model.Volume;
+import com.github.dockerjava.api.model.*;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
@@ -26,12 +17,12 @@ import com.github.dockerjava.core.RemoteApiVersion;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
@@ -46,25 +37,8 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Base64;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.HexFormat;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntConsumer;
@@ -146,7 +120,8 @@ public class DockerUpdateService {
                 .filter(this::notBlank)
                 .map(this::normalizeImageId)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        if (requestedIds != null && requestedIds.isEmpty()) throw new IllegalArgumentException("请至少选择一个待清理镜像");
+        if (requestedIds != null && requestedIds.isEmpty())
+            throw new IllegalArgumentException("请至少选择一个待清理镜像");
         try (DockerConnection connection = connect(Duration.ofMinutes(5))) {
             DockerClient docker = connection.client();
             List<Image> unusedImages = unusedImages(docker);
@@ -239,8 +214,10 @@ public class DockerUpdateService {
             if (config.getEntrypoint() != null && config.getEntrypoint().length > 0) {
                 service.put("entrypoint", Arrays.asList(config.getEntrypoint()));
             }
-            if (config.getCmd() != null && config.getCmd().length > 0) service.put("command", Arrays.asList(config.getCmd()));
-            if (config.getEnv() != null && config.getEnv().length > 0) service.put("environment", Arrays.asList(config.getEnv()));
+            if (config.getCmd() != null && config.getCmd().length > 0)
+                service.put("command", Arrays.asList(config.getCmd()));
+            if (config.getEnv() != null && config.getEnv().length > 0)
+                service.put("environment", Arrays.asList(config.getEnv()));
             if (Boolean.TRUE.equals(config.getStdinOpen())) service.put("stdin_open", true);
             if (Boolean.TRUE.equals(config.getTty())) service.put("tty", true);
             if (config.getLabels() != null) {
@@ -260,6 +237,8 @@ public class DockerUpdateService {
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
         options.setPrettyFlow(true);
         options.setIndent(2);
+        options.setIndicatorIndent(2);
+        options.setIndentWithIndicator(true);
         options.setWidth(160);
         options.setSplitLines(false);
         return new Yaml(options).dump(root);
@@ -279,6 +258,9 @@ public class DockerUpdateService {
         if (notBlank(networkMode) && (Set.of("host", "none").contains(networkMode) || networkMode.startsWith("container:"))) {
             service.put("network_mode", networkMode);
         } else {
+            if ("default".equals(networkMode) || "bridge".equals(networkMode)) {
+                service.put("network_mode", "bridge");
+            }
             List<String> ports = composePorts(host);
             if (!ports.isEmpty()) service.put("ports", ports);
         }
@@ -296,8 +278,10 @@ public class DockerUpdateService {
             service.put("cap_drop", Arrays.stream(host.getCapDrop()).map(Enum::name).toList());
         }
         if (host.getDns() != null && host.getDns().length > 0) service.put("dns", Arrays.asList(host.getDns()));
-        if (host.getDnsSearch() != null && host.getDnsSearch().length > 0) service.put("dns_search", Arrays.asList(host.getDnsSearch()));
-        if (host.getExtraHosts() != null && host.getExtraHosts().length > 0) service.put("extra_hosts", Arrays.asList(host.getExtraHosts()));
+        if (host.getDnsSearch() != null && host.getDnsSearch().length > 0)
+            service.put("dns_search", Arrays.asList(host.getDnsSearch()));
+        if (host.getExtraHosts() != null && host.getExtraHosts().length > 0)
+            service.put("extra_hosts", Arrays.asList(host.getExtraHosts()));
         if (host.getGroupAdd() != null && !host.getGroupAdd().isEmpty()) service.put("group_add", host.getGroupAdd());
         if (host.getSysctls() != null && !host.getSysctls().isEmpty()) service.put("sysctls", host.getSysctls());
         if (host.getTmpFs() != null && !host.getTmpFs().isEmpty()) service.put("tmpfs", host.getTmpFs());
@@ -355,7 +339,7 @@ public class DockerUpdateService {
             if (!volumes.isEmpty()) root.put("volumes", volumes);
         }
         if (inspect.getNetworkSettings() == null || inspect.getNetworkSettings().getNetworks() == null
-                || inspect.getHostConfig() == null || "host".equals(inspect.getHostConfig().getNetworkMode())) return;
+                || inspect.getHostConfig() == null || service.containsKey("network_mode")) return;
         List<String> names = inspect.getNetworkSettings().getNetworks().keySet().stream()
                 .filter(name -> !"bridge".equals(name)).toList();
         if (names.isEmpty()) return;
@@ -500,8 +484,8 @@ public class DockerUpdateService {
                     imageCheckErrors.remove(image);
                     remoteImageDigests.put(image, remoteDigest);
                     log(state, "success", updateAvailable
-                            ? "发现新镜像 " + image + " · " + shortId(remoteDigest)
-                            : "镜像已是最新 " + image);
+                            ? "发现新镜像 " + image + " · " + shortId(remoteDigest) + " 🌸"
+                            : "镜像已是最新 " + image + " ✅");
                 } catch (JobCancelledException exception) {
                     throw exception;
                 } catch (Exception exception) {
@@ -555,7 +539,7 @@ public class DockerUpdateService {
             state.job.setCancellable(false).setPhase("recreating").setProgress(70);
             log(state, "success", "发现新镜像 " + shortId(latestImageId));
             replaceContainer(docker, state, inspect, image, currentImageId, staged);
-            complete(state, "容器更新完成");
+            complete(state, "容器更新完成 🌸");
         }
     }
 
@@ -676,13 +660,15 @@ public class DockerUpdateService {
         if (snapshot.getHostConfig() == null || snapshot.getNetworkSettings() == null
                 || snapshot.getNetworkSettings().getNetworks() == null) return;
         String networkMode = snapshot.getHostConfig().getNetworkMode();
+        if ("default".equals(networkMode) || "bridge".equals(networkMode)) return;
         Map.Entry<String, ContainerNetwork> entry = primaryNetwork(networkMode, snapshot.getNetworkSettings().getNetworks());
         if (entry == null) return;
         ContainerNetwork network = entry.getValue();
         List<String> aliases = cleanAliases(network.getAliases(), snapshot.getId());
         if (!aliases.isEmpty()) command.withAliases(aliases);
-        if (notBlank(network.getIpAddress())) command.withIpv4Address(network.getIpAddress());
-        if (notBlank(network.getGlobalIPv6Address())) command.withIpv6Address(network.getGlobalIPv6Address());
+        ContainerNetwork.Ipam ipam = network.getIpamConfig();
+        if (ipam != null && notBlank(ipam.getIpv4Address())) command.withIpv4Address(ipam.getIpv4Address());
+        if (ipam != null && notBlank(ipam.getIpv6Address())) command.withIpv6Address(ipam.getIpv6Address());
     }
 
     private void connectAdditionalNetworks(DockerClient docker, String containerId, InspectContainerResponse snapshot) {
@@ -694,10 +680,11 @@ public class DockerUpdateService {
             if (primary != null && primary.getKey().equals(entry.getKey())) continue;
             ContainerNetwork original = entry.getValue();
             ContainerNetwork network = new ContainerNetwork();
-            List<String> aliases = cleanAliases(original.getAliases(), snapshot.getId());
-            if (!aliases.isEmpty()) network.withAliases(aliases);
-            if (notBlank(original.getIpAddress())) network.withIpv4Address(original.getIpAddress());
-            if (notBlank(original.getGlobalIPv6Address())) network.withGlobalIPv6Address(original.getGlobalIPv6Address());
+            if (!"bridge".equals(entry.getKey())) {
+                List<String> aliases = cleanAliases(original.getAliases(), snapshot.getId());
+                if (!aliases.isEmpty()) network.withAliases(aliases);
+                if (original.getIpamConfig() != null) network.withIpamConfig(original.getIpamConfig());
+            }
             docker.connectToNetworkCmd()
                     .withNetworkId(entry.getKey())
                     .withContainerId(containerId)
@@ -758,7 +745,7 @@ public class DockerUpdateService {
     }
 
     private String tagHash(DockerClient docker, String imageId, ImageReference reference) {
-        String hash = normalizeImageId(imageId);
+        String hash = shortId(imageId);
         docker.tagImageCmd(imageId, reference.repository(), hash).withForce(true).exec();
         return reference.repository() + ':' + hash;
     }
@@ -856,7 +843,7 @@ public class DockerUpdateService {
     }
 
     private DockerUpdateModels.ContainerInfo containerInfo(DockerClient docker, Container container,
-                                                            Map<String, Set<String>> localDigestCache) {
+                                                           Map<String, Set<String>> localDigestCache) {
         InspectContainerResponse inspect = inspectContainer(docker, container.getId());
         String image = resolveContainerImage(docker, container, inspect);
         StagedImage staged = stagedImages.get(image);
@@ -1138,7 +1125,7 @@ public class DockerUpdateService {
         if (!notBlank(image)) return false;
         int slash = image.lastIndexOf('/');
         int colon = image.lastIndexOf(':');
-        return colon > slash && image.substring(colon + 1).matches("(?i)[a-f0-9]{64}");
+        return colon > slash && image.substring(colon + 1).matches("(?i)(?:[a-f0-9]{12}|[a-f0-9]{64})");
     }
 
     private String updateBlockReason(Container container, InspectContainerResponse inspect, String image) {
@@ -1269,7 +1256,8 @@ public class DockerUpdateService {
 
     private synchronized void assertIdle() {
         DockerUpdateModels.DockerJob active = activeJob();
-        if (active != null && !terminal(active.getStatus())) throw new IllegalStateException("已有 Docker 任务正在运行");
+        if (active != null && !terminal(active.getStatus()))
+            throw new IllegalStateException("已有 Docker 任务正在运行");
     }
 
     private DockerUpdateModels.DockerJob activeJob() {
