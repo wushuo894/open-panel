@@ -514,6 +514,7 @@ async function controlDocker(card, action) {
 .context-menu-icon.frameless img { width: 31px; height: 31px; border-radius: 22%; }
 .context-menu-subheader { min-height: 26px; padding-inline: 9px; font-size: .68rem; }
 .card-context-menu :deep(.v-list-item) { min-height: 41px; margin-block: 1px; padding-inline: 9px; border-radius: 5px; }
+.card-context-menu :deep(.v-list-item__prepend > .v-list-item__spacer) { width: 14px; }
 .card-context-menu :deep(.v-list-item-title) { font-size: .84rem; }
 .card-context-menu :deep(.v-list-item-subtitle) { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .68rem; }
 .context-menu-divider { margin-block: 4px; }
