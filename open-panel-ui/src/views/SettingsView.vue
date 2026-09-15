@@ -147,7 +147,6 @@ async function load() {
     config.value = loadedConfig
     usernameForm.value.newUsername = loadedConfig.security.username
     updateInfo.value = version
-    scanGroupId.value = sortedGroups.value[0]?.id || ''
     loadDockerOverview()
   }
   catch (e) { if (!getToken()) router.replace('/login'); else error.value = e.message }
@@ -227,7 +226,6 @@ function commitGroup() {
   groupDraft.value.title = title
   groupDraft.value.icon = groupDraft.value.icon?.trim() || 'mdi-folder-outline'
   config.value.groups.push(groupDraft.value)
-  if (!scanGroupId.value) scanGroupId.value = groupDraft.value.id
   groupDialog.value = false
   groupDraft.value = null
   message.value = `已添加分组“${title}”，保存后生效`
@@ -243,6 +241,7 @@ function removeGroup(group) {
 async function startScan() {
   error.value = ''
   selectedServices.value = []
+  scanGroupId.value = ''
   scanResultsDialog.value = false
   try {
     scanJob.value = await api('/api/admin/scan', {
@@ -290,6 +289,7 @@ function addScannedServices() {
   message.value = `已添加 ${addedCount} 个 Web 服务卡片，保存后生效`
   scanResultsDialog.value = false
   selectedServices.value = []
+  scanGroupId.value = ''
 }
 
 async function uploadBackground(value) {
@@ -1169,14 +1169,28 @@ function logout() {
         </v-card-title>
         <v-card-text class="scan-results-dialog-content">
           <div class="scan-results-toolbar">
-            <v-checkbox-btn
-              v-model="scanAllSelected"
-              label="全选"
-              color="primary"
-              :indeterminate="scanSelectionIndeterminate"
+            <div class="scan-results-selection">
+              <v-checkbox-btn
+                v-model="scanAllSelected"
+                label="全选"
+                color="primary"
+                :indeterminate="scanSelectionIndeterminate"
+              />
+              <strong>已选 {{ selectedScannedServices.length }} / {{ scannedServices.length }}</strong>
+            </div>
+            <v-select
+              v-model="scanGroupId"
+              class="scan-results-group"
+              label="目标分组"
+              placeholder="请选择要添加到的分组"
+              :items="sortedGroups"
+              item-title="title"
+              item-value="id"
+              no-data-text="暂无可选分组"
+              clearable
+              hide-details
+              persistent-placeholder
             />
-            <strong>已选 {{ selectedScannedServices.length }} / {{ scannedServices.length }}</strong>
-            <v-select v-model="scanGroupId" label="添加到分组" :items="sortedGroups" item-title="title" item-value="id" hide-details />
           </div>
           <div class="scan-results">
             <label v-for="service in scannedServices" :key="service.id" class="scan-result">
@@ -1341,6 +1355,7 @@ function logout() {
 .scan-progress span { color: rgba(var(--v-theme-on-surface),.58); }
 .scan-results { display: grid; gap: 8px; margin-top: 18px; }
 .scan-result { display: flex; align-items: center; min-width: 0; gap: 10px; padding: 11px 12px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgb(var(--v-theme-surface)); cursor: pointer; }
+.scan-result > .v-selection-control { flex: 0 0 auto; }
 .scan-icon { position: relative; display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; overflow: hidden; border-radius: 7px; background: rgb(var(--v-theme-secondary)); color: #1a211d; }
 .scan-icon img { position: absolute; z-index: 1; width: 28px; height: 28px; object-fit: contain; }
 .scan-copy { display: grid; min-width: 0; flex: 1; }
@@ -1348,8 +1363,11 @@ function logout() {
 .scan-copy small { color: rgba(var(--v-theme-on-surface),.56); font-size: .75rem; }
 .scan-results-title { display: flex; min-height: 58px; align-items: center; padding-right: 8px; }
 .scan-results-dialog-content { display: grid; min-height: 180px; gap: 14px; }
-.scan-results-toolbar { display: grid; grid-template-columns: auto minmax(0,1fr) minmax(210px,280px); align-items: center; gap: 14px; }
-.scan-results-toolbar strong { font-size: .86rem; }
+.scan-results-toolbar { display: grid; grid-template-columns: minmax(0,1fr) minmax(240px,300px); align-items: center; gap: 16px; }
+.scan-results-selection { display: flex; min-width: 0; align-items: center; gap: 12px; }
+.scan-results-selection > .v-selection-control { flex: 0 0 auto; }
+.scan-results-selection strong { font-size: .86rem; white-space: nowrap; }
+.scan-results-group { min-width: 0; }
 .scan-results-dialog-content .scan-results { max-height: min(56svh, 560px); overflow-y: auto; margin-top: 0; padding-right: 2px; }
 .password-form { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)) auto; align-items: start; gap: 10px; }
 .username-form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)) auto; align-items: start; gap: 10px; }
@@ -1433,8 +1451,7 @@ function logout() {
   .item-row { flex-wrap: wrap; }
   .password-form, .username-form { grid-template-columns: 1fr; }
   .scan-progress-head { align-items: flex-start; flex-direction: column; }
-  .scan-results-toolbar { grid-template-columns: auto minmax(0,1fr); }
-  .scan-results-toolbar > .v-select { grid-column: 1 / -1; }
+  .scan-results-toolbar { grid-template-columns: 1fr; }
   .scan-result { align-items: flex-start; flex-wrap: wrap; }
   .theme-color-control { grid-template-columns: 44px minmax(0,1fr); }
   .theme-color-swatch { width: 44px; height: 44px; }

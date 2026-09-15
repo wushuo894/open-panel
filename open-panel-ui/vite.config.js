@@ -47,9 +47,21 @@ export default defineConfig({
     server: {
         port: 37788,
         proxy: {
-            '/api': serverHost ? serverHost : 'http://127.0.0.1:57788',
-            '/assets/uploads': serverHost ? serverHost : 'http://127.0.0.1:57788',
-            '/manifest.webmanifest': serverHost ? serverHost : 'http://127.0.0.1:57788'
+            '/api': {
+                target: serverHost ? serverHost : 'http://127.0.0.1:57788',
+                changeOrigin: true,
+                secure: false
+            },
+            '/assets/uploads': {
+                target: serverHost ? serverHost : 'http://127.0.0.1:57788',
+                changeOrigin: true,
+                secure: false
+            },
+            '/manifest.webmanifest': {
+                target: serverHost ? serverHost : 'http://127.0.0.1:57788',
+                changeOrigin: true,
+                secure: false
+            }
         }
     },
     build: {
