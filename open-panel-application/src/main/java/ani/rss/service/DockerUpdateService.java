@@ -116,34 +116,40 @@ public class DockerUpdateService {
 
     public synchronized DockerUpdateModels.ImageCleanupResult cleanupUnusedImages(List<String> imageIds) {
         assertIdle();
-        Set<String> requestedIds = imageIds == null ? null : imageIds.stream()
+        Set<String> requestedTargets = imageIds == null ? null : imageIds.stream()
                 .filter(this::notBlank)
-                .map(this::normalizeImageId)
+                .map(this::cleanupTargetKey)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        if (requestedIds != null && requestedIds.isEmpty())
+        if (requestedTargets != null && requestedTargets.isEmpty())
             throw new IllegalArgumentException("请至少选择一个待清理镜像");
         try (DockerConnection connection = connect(Duration.ofMinutes(5))) {
             DockerClient docker = connection.client();
-            List<Image> unusedImages = unusedImages(docker);
-            List<Image> targets = requestedIds == null ? unusedImages : unusedImages.stream()
-                    .filter(image -> requestedIds.contains(normalizeImageId(image.getId())))
+            List<ImageCleanupTarget> availableTargets = imageCleanupTargets(docker);
+            List<ImageCleanupTarget> targets = requestedTargets == null ? availableTargets : availableTargets.stream()
+                    .filter(target -> requestedTargets.contains(cleanupTargetKey(target.removalReference())))
                     .toList();
-            int skippedImages = requestedIds == null ? 0 : requestedIds.size() - targets.size();
+            int skippedImages = requestedTargets == null ? 0 : requestedTargets.size() - targets.size();
             int deletedImages = 0;
+            int removedTags = 0;
             long spaceReclaimed = 0;
-            for (Image image : targets) {
+            for (ImageCleanupTarget target : targets) {
                 try {
-                    docker.removeImageCmd(image.getId()).withForce(true).withNoPrune(true).exec();
-                    deletedImages++;
-                    spaceReclaimed += image.getSize() == null ? 0 : image.getSize();
+                    docker.removeImageCmd(target.removalReference()).withForce(true).withNoPrune(true).exec();
+                    if (target.tagOnly()) {
+                        removedTags++;
+                    } else {
+                        deletedImages++;
+                        spaceReclaimed += target.image().getSize() == null ? 0 : target.image().getSize();
+                    }
                 } catch (Exception | LinkageError exception) {
                     skippedImages++;
-                    LOGGER.warn("删除未使用镜像 {} 失败: {}", shortId(image.getId()), safeMessage(exception));
+                    LOGGER.warn("清理镜像目标 {} 失败: {}", target.removalReference(), safeMessage(exception));
                 }
             }
-            if (deletedImages > 0) clearImageUpdateCache();
+            if (deletedImages > 0 || removedTags > 0) clearImageUpdateCache();
             return new DockerUpdateModels.ImageCleanupResult()
                     .setDeletedImages(deletedImages)
+                    .setRemovedTags(removedTags)
                     .setSkippedImages(skippedImages)
                     .setSpaceReclaimed(spaceReclaimed);
         } catch (Exception | LinkageError exception) {
@@ -155,7 +161,7 @@ public class DockerUpdateService {
         assertIdle();
         try (DockerConnection connection = connect(Duration.ofSeconds(12))) {
             DockerClient docker = connection.client();
-            List<DockerUpdateModels.UnusedImage> images = unusedImages(docker).stream()
+            List<DockerUpdateModels.UnusedImage> images = imageCleanupTargets(docker).stream()
                     .map(this::unusedImage)
                     .sorted(Comparator.comparing(image -> image.getReferences().isEmpty()
                             ? image.getId() : image.getReferences().getFirst(), String.CASE_INSENSITIVE_ORDER))
@@ -167,15 +173,38 @@ public class DockerUpdateService {
         }
     }
 
-    private List<Image> unusedImages(DockerClient docker) {
-        Set<String> usedImageIds = docker.listContainersCmd().withShowAll(true).exec().stream()
-                .map(Container::getImageId)
-                .filter(Objects::nonNull)
-                .map(this::normalizeImageId)
-                .collect(java.util.stream.Collectors.toSet());
-        return docker.listImagesCmd().withShowAll(true).exec().stream()
-                .filter(image -> !usedImageIds.contains(normalizeImageId(image.getId())))
-                .toList();
+    private List<ImageCleanupTarget> imageCleanupTargets(DockerClient docker) {
+        return imageCleanupTargets(
+                docker.listContainersCmd().withShowAll(true).exec(),
+                docker.listImagesCmd().withShowAll(true).exec());
+    }
+
+    private List<ImageCleanupTarget> imageCleanupTargets(List<Container> containers, List<Image> images) {
+        Map<String, Set<String>> usedReferencesByImageId = new HashMap<>();
+        for (Container container : containers) {
+            String imageId = imageIdKey(container.getImageId());
+            if (!notBlank(imageId)) continue;
+            Set<String> references = usedReferencesByImageId.computeIfAbsent(imageId,
+                    ignored -> new TreeSet<>(String.CASE_INSENSITIVE_ORDER));
+            if (notBlank(container.getImage())) references.add(normalizeImageReference(container.getImage()));
+        }
+        List<ImageCleanupTarget> targets = new ArrayList<>();
+        for (Image image : images) {
+            Set<String> usedReferences = usedReferencesByImageId.get(imageIdKey(image.getId()));
+            if (usedReferences == null) {
+                targets.add(new ImageCleanupTarget(image, image.getId(), false));
+                continue;
+            }
+            imageReferences(image).stream()
+                    .filter(reference -> !usedReferences.contains(normalizeImageReference(reference)))
+                    .map(reference -> new ImageCleanupTarget(image, reference, true))
+                    .forEach(targets::add);
+        }
+        return targets;
+    }
+
+    List<DockerUpdateModels.UnusedImage> imageCleanupEntries(List<Container> containers, List<Image> images) {
+        return imageCleanupTargets(containers, images).stream().map(this::unusedImage).toList();
     }
 
     private void clearImageUpdateCache() {
@@ -185,7 +214,19 @@ public class DockerUpdateService {
         remoteImageDigests.clear();
     }
 
-    private DockerUpdateModels.UnusedImage unusedImage(Image image) {
+    private DockerUpdateModels.UnusedImage unusedImage(ImageCleanupTarget target) {
+        Image image = target.image();
+        List<String> references = target.tagOnly()
+                ? List.of(target.removalReference()) : imageReferences(image);
+        return new DockerUpdateModels.UnusedImage()
+                .setId(Objects.toString(image.getId(), ""))
+                .setCleanupTarget(Objects.toString(target.removalReference(), ""))
+                .setTagOnly(target.tagOnly())
+                .setReferences(references)
+                .setSize(target.tagOnly() || image.getSize() == null ? 0 : image.getSize());
+    }
+
+    private List<String> imageReferences(Image image) {
         List<String> references = image.getRepoTags() == null ? new ArrayList<>()
                 : Arrays.stream(image.getRepoTags())
                 .filter(this::notBlank)
@@ -193,10 +234,27 @@ public class DockerUpdateService {
                 .distinct()
                 .sorted(String.CASE_INSENSITIVE_ORDER)
                 .toList();
-        return new DockerUpdateModels.UnusedImage()
-                .setId(Objects.toString(image.getId(), ""))
-                .setReferences(references)
-                .setSize(image.getSize() == null ? 0 : image.getSize());
+        return references;
+    }
+
+    private String imageIdKey(String value) {
+        return normalizeImageId(value).toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizeImageReference(String value) {
+        String reference = Objects.toString(value, "").strip();
+        if (reference.contains("@")) return reference;
+        int slash = reference.lastIndexOf('/');
+        int colon = reference.lastIndexOf(':');
+        return colon > slash ? reference : reference + ":latest";
+    }
+
+    private String cleanupTargetKey(String value) {
+        String target = Objects.toString(value, "").strip();
+        if (target.startsWith("sha256:") || target.matches("(?i)[a-f0-9]{64}")) {
+            return normalizeImageId(target).toLowerCase(Locale.ROOT);
+        }
+        return target;
     }
 
     private String composeYaml(DockerClient docker, Container container, InspectContainerResponse inspect) {
@@ -757,8 +815,9 @@ public class DockerUpdateService {
     private void removeTemporaryTag(DockerClient docker, String reference) {
         if (!notBlank(reference)) return;
         try {
-            docker.removeImageCmd(reference).withForce(false).withNoPrune(true).exec();
-        } catch (Exception ignored) {
+            docker.removeImageCmd(reference).withForce(true).withNoPrune(true).exec();
+        } catch (Exception exception) {
+            LOGGER.warn("移除临时镜像标签 {} 失败: {}", reference, safeMessage(exception));
         }
     }
 
@@ -1355,5 +1414,8 @@ public class DockerUpdateService {
 
     private record StagedImage(ImageReference reference, String previousImageId, String newImageId,
                                String hashReference) {
+    }
+
+    private record ImageCleanupTarget(Image image, String removalReference, boolean tagOnly) {
     }
 }

@@ -34,6 +34,7 @@ const scanForm = ref({ target: currentPageHost, range: [80, 65535] })
 const scanJob = ref(null)
 const scanGroupId = ref('')
 const selectedServices = ref([])
+const scanResultsDialog = ref(false)
 const dockerOverview = ref({ available: false, error: '', containers: [], activeJob: null })
 const dockerLoading = ref(false)
 const dockerJob = ref(null)
@@ -90,20 +91,33 @@ const proxiesText = computed({
 
 const scanRunning = computed(() => ['queued', 'running', 'cancelling'].includes(scanJob.value?.status))
 const scanProgress = computed(() => scanJob.value?.total ? Math.round(scanJob.value.scanned / scanJob.value.total * 100) : 0)
+const scannedServices = computed(() => scanJob.value?.results || [])
+const selectedScannedServices = computed(() => {
+  const selected = new Set(selectedServices.value)
+  return scannedServices.value.filter(service => selected.has(service.id))
+})
+const scanAllSelected = computed({
+  get: () => Boolean(scannedServices.value.length)
+    && selectedScannedServices.value.length === scannedServices.value.length,
+  set: selected => {
+    selectedServices.value = selected ? scannedServices.value.map(service => service.id) : []
+  }
+})
+const scanSelectionIndeterminate = computed(() => selectedScannedServices.value.length > 0 && !scanAllSelected.value)
 const dockerJobRunning = computed(() => ['queued', 'running', 'cancelling'].includes(dockerJob.value?.status))
 const dockerUpdates = computed(() => dockerOverview.value.containers.filter(container => container.updateAvailable).length)
 const sortedDockerContainers = computed(() => [...dockerOverview.value.containers]
   .sort((left, right) => Number(Boolean(right.updateAvailable)) - Number(Boolean(left.updateAvailable))))
 const cleanupSelectedImages = computed(() => {
   const selected = new Set(cleanupSelectedImageIds.value)
-  return (cleanupPreview.value?.images || []).filter(image => selected.has(image.id))
+  return (cleanupPreview.value?.images || []).filter(image => selected.has(image.cleanupTarget || image.id))
 })
 const cleanupSelectedSize = computed(() => cleanupSelectedImages.value.reduce((total, image) => total + image.size, 0))
 const cleanupAllSelected = computed({
   get: () => Boolean(cleanupPreview.value?.images?.length)
     && cleanupSelectedImageIds.value.length === cleanupPreview.value.images.length,
   set: selected => {
-    cleanupSelectedImageIds.value = selected ? cleanupPreview.value?.images?.map(image => image.id) || [] : []
+    cleanupSelectedImageIds.value = selected ? cleanupPreview.value?.images?.map(image => image.cleanupTarget || image.id) || [] : []
   }
 })
 const cleanupSelectionIndeterminate = computed(() => cleanupSelectedImageIds.value.length > 0 && !cleanupAllSelected.value)
@@ -229,6 +243,7 @@ function removeGroup(group) {
 async function startScan() {
   error.value = ''
   selectedServices.value = []
+  scanResultsDialog.value = false
   try {
     scanJob.value = await api('/api/admin/scan', {
       method: 'POST',
@@ -246,9 +261,11 @@ async function pollScan() {
   clearTimeout(scanTimer)
   if (!scanJob.value?.id) return
   try {
+    const wasRunning = scanRunning.value
     scanJob.value = await api(`/api/admin/scan/${scanJob.value.id}`)
     if (scanRunning.value) scanTimer = setTimeout(pollScan, 700)
     else if (scanJob.value.status === 'failed') error.value = scanJob.value.error || '扫描失败'
+    if (wasRunning && !scanRunning.value && scannedServices.value.length) scanResultsDialog.value = true
   } catch (e) { error.value = e.message }
 }
 
@@ -260,9 +277,9 @@ async function cancelScan() {
 
 function addScannedServices() {
   if (!scanGroupId.value) { error.value = '请先选择目标分组'; return }
-  const selected = new Set(selectedServices.value)
-  for (const service of scanJob.value?.results || []) {
-    if (!selected.has(service.id)) continue
+  if (!selectedScannedServices.value.length) return
+  const addedCount = selectedScannedServices.value.length
+  for (const service of selectedScannedServices.value) {
     config.value.cards.push({
       id: uuid(), groupId: scanGroupId.value, type: 'service', title: service.title,
       remark: service.description, icon: 'mdi-application-outline', iconUrl: service.iconUrl,
@@ -270,7 +287,8 @@ function addScannedServices() {
       service: { serviceType: 'generic', internalUrl: service.url, externalUrl: service.url, statusUrl: service.url, token: '' }
     })
   }
-  message.value = `已添加 ${selected.size} 个 Web 服务卡片，保存后生效`
+  message.value = `已添加 ${addedCount} 个 Web 服务卡片，保存后生效`
+  scanResultsDialog.value = false
   selectedServices.value = []
 }
 
@@ -472,9 +490,12 @@ async function cleanupDockerImages() {
       body: JSON.stringify({ imageIds: cleanupSelectedImageIds.value })
     })
     cleanupDialog.value = false
-    message.value = result.deletedImages
-      ? `已删除 ${result.deletedImages} 个未使用镜像，释放约 ${formatBytes(result.spaceReclaimed)}${result.skippedImages ? `，${result.skippedImages} 个镜像已跳过` : ''}`
-      : result.skippedImages ? `${result.skippedImages} 个镜像已被使用或无法删除` : '没有可删除的未使用镜像'
+    const removedTags = result.removedTags || 0
+    const cleanupSummary = []
+    if (result.deletedImages) cleanupSummary.push(`已删除 ${result.deletedImages} 个未使用镜像，释放约 ${formatBytes(result.spaceReclaimed)}`)
+    if (removedTags) cleanupSummary.push(`已移除 ${removedTags} 个冗余标签`)
+    if (result.skippedImages) cleanupSummary.push(`${result.skippedImages} 个目标已跳过`)
+    message.value = cleanupSummary.length ? cleanupSummary.join('，') : '没有可清理的镜像或标签'
     dockerJob.value = null
     await loadDockerOverview(false)
   } catch (e) { error.value = e.message }
@@ -489,7 +510,7 @@ async function openCleanupDialog() {
   error.value = ''
   try {
     cleanupPreview.value = await api('/api/admin/docker/images/unused')
-    cleanupSelectedImageIds.value = cleanupPreview.value.images.map(image => image.id)
+    cleanupSelectedImageIds.value = cleanupPreview.value.images.map(image => image.cleanupTarget || image.id)
   } catch (e) {
     error.value = e.message
     cleanupDialog.value = false
@@ -504,6 +525,7 @@ function cleanupImageName(image) {
 
 function cleanupImageDetail(image) {
   const id = String(image.id || '').replace(/^sha256:/, '').slice(0, 12) || '未知 ID'
+  if (image.tagOnly) return `${id} · 仅移除冗余标签`
   const more = image.references?.length > 1 ? ` · 另有 ${image.references.length - 1} 个标签` : ''
   return `${id} · ${formatBytes(image.size)}${more}`
 }
@@ -779,23 +801,17 @@ function logout() {
               <v-btn v-else variant="outlined" color="error" prepend-icon="mdi-stop" size="large" @click="cancelScan">停止</v-btn>
             </div>
             <div v-if="scanJob" class="scan-progress">
-              <div><strong>{{ scanJob.status === 'completed' ? '扫描完成' : scanJob.status === 'cancelled' ? '扫描已停止' : '正在扫描' }}</strong><span>{{ scanJob.scanned }} / {{ scanJob.total }} 端口 · 已发现 {{ scanJob.results.length }} 个服务</span></div>
-              <v-progress-linear :model-value="scanProgress" color="secondary" height="7" rounded />
-            </div>
-            <div v-if="scanJob?.results?.length" class="scan-results">
-              <label v-for="service in scanJob.results" :key="service.id" class="scan-result">
-                <v-checkbox-btn v-model="selectedServices" :value="service.id" color="primary" />
-                <span class="scan-icon">
-                  <img v-if="service.iconUrl" :src="appUrl(service.iconUrl)" alt="" @error="service.iconUrl = ''" />
-                  <v-icon v-else icon="mdi-web" />
-                </span>
-                <span class="scan-copy"><strong>{{ service.title }}</strong><small>{{ service.url }}</small><small>{{ service.description }}</small></span>
-                <v-chip size="small" variant="tonal">{{ service.protocol.toUpperCase() }} {{ service.statusCode }}</v-chip>
-              </label>
-              <div class="scan-add-row">
-                <v-select v-model="scanGroupId" label="添加到分组" :items="sortedGroups" item-title="title" item-value="id" hide-details />
-                <v-btn color="secondary" prepend-icon="mdi-plus" :disabled="!selectedServices.length" @click="addScannedServices">添加所选（{{ selectedServices.length }}）</v-btn>
+              <div class="scan-progress-head">
+                <div><strong>{{ scanJob.status === 'completed' ? '扫描完成' : scanJob.status === 'cancelled' ? '扫描已停止' : '正在扫描' }}</strong><span>{{ scanJob.scanned }} / {{ scanJob.total }} 端口 · 已发现 {{ scanJob.results.length }} 个服务</span></div>
+                <v-btn
+                  v-if="scanJob.results.length"
+                  variant="outlined"
+                  prepend-icon="mdi-format-list-checks"
+                  size="small"
+                  @click="scanResultsDialog = true"
+                >查看结果（{{ scanJob.results.length }}）</v-btn>
               </div>
+              <v-progress-linear :model-value="scanProgress" color="secondary" height="7" rounded />
             </div>
           </section>
 
@@ -1144,6 +1160,49 @@ function logout() {
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="scanResultsDialog" max-width="760" scrollable>
+      <v-card>
+        <v-card-title class="scan-results-title">
+          <span>发现的 Web 服务</span>
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" aria-label="关闭" @click="scanResultsDialog = false" />
+        </v-card-title>
+        <v-card-text class="scan-results-dialog-content">
+          <div class="scan-results-toolbar">
+            <v-checkbox-btn
+              v-model="scanAllSelected"
+              label="全选"
+              color="primary"
+              :indeterminate="scanSelectionIndeterminate"
+            />
+            <strong>已选 {{ selectedScannedServices.length }} / {{ scannedServices.length }}</strong>
+            <v-select v-model="scanGroupId" label="添加到分组" :items="sortedGroups" item-title="title" item-value="id" hide-details />
+          </div>
+          <div class="scan-results">
+            <label v-for="service in scannedServices" :key="service.id" class="scan-result">
+              <v-checkbox-btn v-model="selectedServices" :value="service.id" color="primary" :aria-label="`选择 ${service.title}`" />
+              <span class="scan-icon">
+                <img v-if="service.iconUrl" :src="appUrl(service.iconUrl)" alt="" @error="service.iconUrl = ''" />
+                <v-icon v-else icon="mdi-web" />
+              </span>
+              <span class="scan-copy"><strong>{{ service.title }}</strong><small>{{ service.url }}</small><small>{{ service.description }}</small></span>
+              <v-chip size="small" variant="tonal">{{ service.protocol.toUpperCase() }} {{ service.statusCode }}</v-chip>
+            </label>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="scanResultsDialog = false">取消</v-btn>
+          <v-btn
+            color="secondary"
+            prepend-icon="mdi-plus"
+            :disabled="scanRunning || !scanGroupId || !selectedScannedServices.length"
+            @click="addScannedServices"
+          >确认添加（{{ selectedScannedServices.length }}）</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-dialog v-model="composeDialog" max-width="900">
       <v-card>
         <v-card-title class="compose-title">
@@ -1165,7 +1224,7 @@ function logout() {
 
     <v-dialog v-model="cleanupDialog" max-width="680" scrollable persistent>
       <v-card>
-        <v-card-title>清理未使用镜像</v-card-title>
+        <v-card-title>清理镜像和冗余标签</v-card-title>
         <v-card-text class="cleanup-dialog-content">
           <v-progress-linear v-if="cleanupPreviewLoading" indeterminate color="secondary" />
           <template v-else-if="cleanupPreview">
@@ -1181,15 +1240,15 @@ function logout() {
               <small>合计 {{ formatBytes(cleanupSelectedSize) }}</small>
             </div>
             <div v-if="cleanupPreview.images.length" class="cleanup-image-list">
-              <div v-for="image in cleanupPreview.images" :key="image.id" class="cleanup-image-row">
+              <div v-for="image in cleanupPreview.images" :key="image.cleanupTarget || image.id" class="cleanup-image-row">
                 <v-checkbox-btn
                   v-model="cleanupSelectedImageIds"
-                  :value="image.id"
+                  :value="image.cleanupTarget || image.id"
                   color="primary"
                   :disabled="cleanupLoading"
                   :aria-label="`选择镜像 ${cleanupImageName(image)}`"
                 />
-                <v-icon icon="mdi-package-variant" size="22" />
+                <v-icon :icon="image.tagOnly ? 'mdi-tag-remove-outline' : 'mdi-package-variant'" size="22" />
                 <span>
                   <strong :title="image.references?.join('\n')">{{ cleanupImageName(image) }}</strong>
                   <small>{{ cleanupImageDetail(image) }}</small>
@@ -1277,7 +1336,8 @@ function logout() {
 .range-control { padding-top: 8px; }
 .range-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: -6px; }
 .scan-progress { display: grid; gap: 11px; margin-top: 18px; }
-.scan-progress > div { display: flex; justify-content: space-between; gap: 12px; font-size: .82rem; }
+.scan-progress-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: .82rem; }
+.scan-progress-head > div { display: grid; gap: 3px; }
 .scan-progress span { color: rgba(var(--v-theme-on-surface),.58); }
 .scan-results { display: grid; gap: 8px; margin-top: 18px; }
 .scan-result { display: flex; align-items: center; min-width: 0; gap: 10px; padding: 11px 12px; border: 1px solid rgba(var(--v-theme-on-surface),.1); border-radius: 8px; background: rgb(var(--v-theme-surface)); cursor: pointer; }
@@ -1286,7 +1346,11 @@ function logout() {
 .scan-copy { display: grid; min-width: 0; flex: 1; }
 .scan-copy strong, .scan-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scan-copy small { color: rgba(var(--v-theme-on-surface),.56); font-size: .75rem; }
-.scan-add-row { display: grid; grid-template-columns: minmax(190px, 1fr) auto; align-items: center; gap: 12px; margin-top: 8px; }
+.scan-results-title { display: flex; min-height: 58px; align-items: center; padding-right: 8px; }
+.scan-results-dialog-content { display: grid; min-height: 180px; gap: 14px; }
+.scan-results-toolbar { display: grid; grid-template-columns: auto minmax(0,1fr) minmax(210px,280px); align-items: center; gap: 14px; }
+.scan-results-toolbar strong { font-size: .86rem; }
+.scan-results-dialog-content .scan-results { max-height: min(56svh, 560px); overflow-y: auto; margin-top: 0; padding-right: 2px; }
 .password-form { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)) auto; align-items: start; gap: 10px; }
 .username-form { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)) auto; align-items: start; gap: 10px; }
 .docker-summary { display: flex; gap: 28px; margin-bottom: 18px; }
@@ -1368,7 +1432,9 @@ function logout() {
   .header-inner > div { display: none; }
   .item-row { flex-wrap: wrap; }
   .password-form, .username-form { grid-template-columns: 1fr; }
-  .scan-add-row { grid-template-columns: 1fr; }
+  .scan-progress-head { align-items: flex-start; flex-direction: column; }
+  .scan-results-toolbar { grid-template-columns: auto minmax(0,1fr); }
+  .scan-results-toolbar > .v-select { grid-column: 1 / -1; }
   .scan-result { align-items: flex-start; flex-wrap: wrap; }
   .theme-color-control { grid-template-columns: 44px minmax(0,1fr); }
   .theme-color-swatch { width: 44px; height: 44px; }
