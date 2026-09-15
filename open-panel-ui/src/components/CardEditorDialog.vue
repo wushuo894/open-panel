@@ -172,27 +172,35 @@ function changeSystemMetric(metric) {
 
 async function autoFillCardFromLink() {
   const source = draft.value[draft.value.type]
-  const url = source?.internalUrl?.trim() || source?.externalUrl?.trim()
-  if (!url) {
+  const urls = [...new Set([
+    source?.externalUrl?.trim(),
+    source?.internalUrl?.trim()
+  ].filter(Boolean))]
+  if (!urls.length) {
     error.value = '请先填写内网或公网 URL'
     return
   }
   loadingMetadata.value = true
   error.value = ''
   try {
-    const metadata = await api('/api/admin/link-metadata', {
-      method: 'POST',
-      body: JSON.stringify({ url })
-    })
-    if (metadata.title) draft.value.title = metadata.title
-    if (metadata.description) draft.value.remark = metadata.description
-    if (metadata.iconUrl) {
-      remoteIconUrl.value = metadata.iconUrl
-      iconSource.value = 'url'
-      draft.value.iconUrl = metadata.iconUrl
+    for (const url of urls) {
+      try {
+        const metadata = await api('/api/admin/link-metadata', {
+          method: 'POST',
+          body: JSON.stringify({ url })
+        })
+        if (metadata.title) draft.value.title = metadata.title
+        if (metadata.description) draft.value.remark = metadata.description
+        if (metadata.iconUrl) {
+          remoteIconUrl.value = metadata.iconUrl
+          iconSource.value = 'url'
+          draft.value.iconUrl = metadata.iconUrl
+        }
+        return
+      } catch (exception) {
+        error.value = exception.message
+      }
     }
-  } catch (exception) {
-    error.value = exception.message
   } finally {
     loadingMetadata.value = false
   }
