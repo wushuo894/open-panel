@@ -1,5 +1,6 @@
 package ani.rss.service;
 
+import ani.rss.config.DefaultConfigFactory;
 import ani.rss.entity.PanelConfig;
 import ani.rss.entity.web.DockerUpdateModels;
 import ani.rss.repository.JsonConfigRepository;
@@ -434,6 +435,7 @@ public class DockerUpdateService {
     }
 
     private void startAutomaticCheck() {
+        if (!DefaultConfigFactory.dockerAvailable()) return;
         try {
             startCheck();
         } catch (IllegalStateException ignored) {

@@ -27,8 +27,9 @@ logging:
   logback:
     rollingpolicy:
       clean-history-on-start: true
+      file-name-pattern: ${LOG_FILE}.%d{yyyy-MM-dd}.%i
       max-file-size: 20MB
-      max-history: ${OPEN_PANEL_LOG_MAX_HISTORY:7}
+      max-history: 7
       total-size-cap: 512MB
 
 open-panel:

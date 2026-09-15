@@ -76,7 +76,7 @@ public final class DefaultConfigFactory {
         return true;
     }
 
-    private static boolean dockerAvailable() {
+    public static boolean dockerAvailable() {
         String dockerHost = System.getenv("DOCKER_HOST");
         if (dockerHost != null && !dockerHost.isBlank()) return true;
         String userHome = System.getProperty("user.home", "");
