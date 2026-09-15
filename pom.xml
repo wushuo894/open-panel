@@ -13,7 +13,7 @@
 
     <groupId>open.panel</groupId>
     <artifactId>open-panel</artifactId>
-    <version>1.0.11</version>
+    <version>1.0.12</version>
     <packaging>pom</packaging>
 
     <name>open-panel</name>
