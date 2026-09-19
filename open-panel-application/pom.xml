@@ -75,7 +75,7 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>ani.rss.OpenPanelApplication</mainClass>
+                    <mainClass>open.panel.OpenPanelApplication</mainClass>
                 </configuration>
                 <executions>
                     <execution>
