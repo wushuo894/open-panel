@@ -42,6 +42,7 @@
 
     <properties>
         <java.version>25</java.version>
+        <lombok.version>1.18.48</lombok.version>
         <frontend.skip>false</frontend.skip>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
