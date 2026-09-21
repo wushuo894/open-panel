@@ -554,7 +554,7 @@ function formatLogTime(timestamp) {
 .docker-copy small, .docker-task-head small { margin-top: 3px; color: rgba(var(--v-theme-on-surface),.58); font-size: .76rem; }
 .docker-image { font-size: .8rem !important; }
 .docker-row--updating .docker-copy strong { color: rgb(var(--v-theme-primary)); }
-.docker-card-badges { display: flex; align-self: start; align-items: center; gap: 4px; }
+.docker-card-badges { display: flex; align-self: start; align-items: center; flex: 0 0 auto; gap: 4px; white-space: nowrap; }
 .docker-card-meta { display: flex; min-width: 0; align-items: center; gap: 5px; overflow: hidden; margin-top: 9px; color: rgba(var(--v-theme-on-surface),.58); font-size: .73rem; white-space: nowrap; }
 .docker-card-meta > .v-icon { flex: 0 0 auto; }
 .docker-card-meta.docker-error { color: rgb(var(--v-theme-error)); }
@@ -603,7 +603,8 @@ function formatLogTime(timestamp) {
   .section-heading { align-items: flex-start; flex-direction: column; }
   .docker-summary { justify-content: space-between; gap: 12px; }
   .docker-row { min-height: 138px; padding-inline: 12px; }
-  .docker-card-badges .v-chip { display: none; }
+  /* 移动端保留状态标签，左侧容器名称会自动省略并让出空间。 */
+  .docker-card-head { gap: 8px; }
   .docker-task-head { grid-template-columns: minmax(0,1fr) auto; }
   .docker-task-head .v-btn { grid-column: 1 / 3; justify-self: start; }
   .docker-log { height: 220px; }
