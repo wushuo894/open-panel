@@ -1,5 +1,6 @@
 package open.panel.controller;
 
+import lombok.RequiredArgsConstructor;
 import open.panel.repository.JsonConfigRepository;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -8,14 +9,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 根据当前站点配置动态生成 PWA Web App Manifest。
+ */
 @RestController
+@RequiredArgsConstructor
 public class PwaController {
     private final JsonConfigRepository repository;
 
-    public PwaController(JsonConfigRepository repository) {
-        this.repository = repository;
-    }
-
+    /**
+     * 返回使用当前站点标题和内置图标的 PWA 清单。
+     */
     @GetMapping(value = "/manifest.webmanifest", produces = "application/manifest+json")
     public Map<String, Object> manifest() {
         String title = repository.get().getSite().getTitle();

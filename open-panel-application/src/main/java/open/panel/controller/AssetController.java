@@ -7,12 +7,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestPart;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.Files;
@@ -25,6 +20,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * 管理用户上传的图标和背景图片，并提供带长期缓存的资源访问接口。
+ */
 @RestController
 @RequestMapping
 public class AssetController {
@@ -34,11 +32,17 @@ public class AssetController {
     private static final Set<String> BACKGROUND_EXTENSIONS = Set.of("avif", "png", "webp", "jpg", "jpeg", "gif");
     private final Path uploadDirectory;
 
+    /**
+     * 初始化位于配置目录内的上传资源目录。
+     */
     public AssetController(@Value("${open-panel.config-dir}") String configDir) throws Exception {
         uploadDirectory = Path.of(configDir).toAbsolutePath().normalize().resolve("uploads");
         Files.createDirectories(uploadDirectory);
     }
 
+    /**
+     * 上传并保存不超过 2 MB 的卡片图标。
+     */
     @PostMapping(value = "/api/admin/assets/icon", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Result<Map<String, String>> uploadIcon(@RequestPart("file") MultipartFile file) throws Exception {
         if (file.isEmpty() || file.getSize() > MAX_ICON_SIZE) {
@@ -48,6 +52,9 @@ public class AssetController {
                 "图标仅支持 AVIF、PNG、WebP、JPG、JPEG、GIF、SVG 和 ICO")));
     }
 
+    /**
+     * 上传并保存不超过 20 MB 的面板背景图片。
+     */
     @PostMapping(value = "/api/admin/assets/background", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Result<Map<String, String>> uploadBackground(@RequestPart("file") MultipartFile file) throws Exception {
         if (file.isEmpty() || file.getSize() > MAX_BACKGROUND_SIZE) {
@@ -57,6 +64,9 @@ public class AssetController {
                 "背景图片仅支持 AVIF、PNG、WebP、JPG、JPEG 和 GIF")));
     }
 
+    /**
+     * 返回上传资源；文件名和规范化路径校验共同防止目录穿越。
+     */
     @GetMapping("/assets/uploads/{filename:[a-zA-Z0-9.-]+}")
     public ResponseEntity<Resource> icon(@PathVariable String filename) {
         Path file = uploadDirectory.resolve(filename).normalize();
@@ -70,6 +80,9 @@ public class AssetController {
                 .body(new FileSystemResource(file));
     }
 
+    /**
+     * 校验扩展名，以内容哈希生成稳定文件名，并尽可能原子地写入目标位置。
+     */
     private String store(MultipartFile file, String prefix, Set<String> allowedExtensions,
                          String unsupportedMessage) throws Exception {
         String extension = extension(file.getOriginalFilename());
@@ -87,6 +100,9 @@ public class AssetController {
         return "assets/uploads/" + filename;
     }
 
+    /**
+     * 从客户端文件名中安全提取小写扩展名。
+     */
     private String extension(String originalFilename) {
         if (originalFilename == null) return "";
         String leaf = originalFilename.replace('\\', '/');
@@ -95,6 +111,9 @@ public class AssetController {
         return index < 0 || index == leaf.length() - 1 ? "" : leaf.substring(index + 1).toLowerCase(Locale.ROOT);
     }
 
+    /**
+     * 组合可读名称与内容摘要，避免重名覆盖并便于浏览器长期缓存。
+     */
     private String assetFilename(String originalFilename, String prefix, String extension, byte[] bytes)
             throws Exception {
         String leaf = originalFilename == null ? "" : originalFilename.replace('\\', '/');
@@ -110,6 +129,9 @@ public class AssetController {
         return prefix + "-" + safeName + "-" + hash + "." + extension;
     }
 
+    /**
+     * 根据受支持的文件扩展名返回响应媒体类型。
+     */
     private MediaType mediaType(String filename) {
         if (filename.endsWith(".png")) return MediaType.IMAGE_PNG;
         if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) return MediaType.IMAGE_JPEG;
