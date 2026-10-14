@@ -477,9 +477,9 @@ async function controlDocker(card, action) {
 .icon-grid .add-card-tile span { display: none; }
 .cover .add-card-tile { border-color: rgba(255,255,255,.35); background: rgba(21,26,25,.38); }
 .add-card-tile:hover { border-color: rgb(var(--v-theme-primary)); background: rgba(var(--v-theme-surface), .58); }
-.card-icon { display: grid; flex: 0 0 46px; width: 46px; height: 46px; place-items: center; overflow: hidden; border: 1px solid rgba(255,255,255,.42); border-radius: 8px; background: rgba(255,255,255,.72); color: #1a211d; backdrop-filter: blur(8px); }
-:global(.v-theme--dark) .card-icon { border-color: rgba(255,255,255,.12); background: rgba(255,255,255,.14); color: #f4f7f5; }
-.cover .card-icon { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.72); color: #1a211d; }
+/* 使用不透明底色，避免图标背景在深色卡片上混色发灰。 */
+.card-icon { display: grid; flex: 0 0 46px; width: 46px; height: 46px; place-items: center; overflow: hidden; border: 1px solid rgba(255,255,255,.42); border-radius: 8px; background: #fff; color: #1a211d; backdrop-filter: blur(8px); }
+.cover .card-icon { border-color: rgba(255,255,255,.3); background: #fff; color: #1a211d; }
 .card-icon img { width: 30px; height: 30px; object-fit: contain; }
 .card-icon.frameless { overflow: visible; border-color: transparent; background: transparent; color: currentColor; backdrop-filter: none; }
 .card-icon.frameless img { width: 46px; height: 46px; border-radius: 22%; }
@@ -507,8 +507,7 @@ async function controlDocker(card, action) {
 .context-menu-heading strong, .context-menu-heading small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .context-menu-heading strong { font-size: .88rem; }
 .context-menu-heading small { color: rgba(var(--v-theme-on-surface), .56); font-size: .7rem; }
-.context-menu-icon { display: grid; width: 31px; height: 31px; flex: 0 0 31px; place-items: center; overflow: hidden; border: 1px solid rgba(var(--v-theme-on-surface), .08); border-radius: 6px; background: rgba(255,255,255,.7); color: #1a211d; }
-:global(.v-theme--dark) .context-menu-icon { border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.12); color: #f4f7f5; }
+.context-menu-icon { display: grid; width: 31px; height: 31px; flex: 0 0 31px; place-items: center; overflow: hidden; border: 1px solid rgba(var(--v-theme-on-surface), .08); border-radius: 6px; background: #fff; color: #1a211d; }
 .context-menu-icon img { width: 22px; height: 22px; object-fit: contain; }
 .context-menu-icon.frameless { overflow: visible; border-color: transparent; background: transparent; }
 .context-menu-icon.frameless img { width: 31px; height: 31px; border-radius: 22%; }
